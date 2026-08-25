@@ -3,7 +3,7 @@ import { render, rematerialize } from './app.js';
 import { activateWithNewKeypair, activateWithSecretKeyBytes, hasSavedKey, saveCurrentKey, unlockSavedKey, clearSavedKey } from './identity.js';
 import { claimableNow } from '../core/accrual.js';
 import { spendableClaims, totalBalance, buildSignedTransferEvent, buildSignedSplitEvent } from '../core/wallet.js';
-import { formatAiwaAmount, toUnits, fromUnits } from '../core/units.js';
+import { format as formatAiwaAmount, toUnits, fromUnits } from '../core/units.js';
 import { checkCausalConsistency } from '../core/causal-tick.js';
 import { computeResidualDiversity } from '../core/mirror.js';
 
