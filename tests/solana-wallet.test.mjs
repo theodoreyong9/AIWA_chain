@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as solanaWeb3 from '@solana/web3.js';
 import {
   generateKeypair, keypairFromSecretKey, encryptSecretKey, decryptSecretKey,
-  buildBurnTransaction, signAndSerialize,
+  buildBurnTransaction, signAndSerialize, generateLightweightKeypair, lightweightKeypairFromSecretKey,
 } from '../public/core/solana-wallet.js';
 import { SOLANA_INCINERATOR_ADDRESS } from '../public/core/identity-cost.js';
 
@@ -51,4 +51,38 @@ test('signAndSerialize produces real, validly-signed bytes', () => {
   const raw = signAndSerialize(tx, kp);
   const roundTripped = solanaWeb3.Transaction.from(raw);
   assert.equal(roundTripped.signatures[0].publicKey.toBase58(), kp.publicKey.toBase58());
+});
+
+test('generateLightweightKeypair produces a real, usable keypair shape, no @solana/web3.js involved', async () => {
+  const kp = await generateLightweightKeypair();
+  assert.equal(kp.secretKey.length, 64);
+  assert.equal(kp.publicKey.toBytes().length, 32);
+  assert.equal(typeof kp.publicKey.toBase58(), 'string');
+});
+
+test('THE REAL PROPERTY: a lightweight keypair and a real solanaWeb3 keypair from the identical seed derive the identical base58 address', async () => {
+  const solanaKp = generateKeypair(solanaWeb3);
+  const seed = solanaKp.secretKey.slice(0, 32);
+  const rebuilt = await lightweightKeypairFromSecretKey(solanaKp.secretKey);
+  assert.equal(rebuilt.publicKey.toBase58(), solanaKp.publicKey.toBase58(), 'the lightweight path must derive the exact same real identity as the full library would');
+});
+
+test('lightweightKeypairFromSecretKey round-trips a real secret key exactly', async () => {
+  const original = await generateLightweightKeypair();
+  const rebuilt = await lightweightKeypairFromSecretKey(original.secretKey);
+  assert.deepEqual(Array.from(rebuilt.secretKey), Array.from(original.secretKey));
+  assert.equal(rebuilt.publicKey.toBase58(), original.publicKey.toBase58());
+});
+
+test('SECURITY: lightweightKeypairFromSecretKey rejects a secret key whose embedded public half does not match', async () => {
+  const a = await generateLightweightKeypair();
+  const b = await generateLightweightKeypair();
+  const tampered = new Uint8Array(64);
+  tampered.set(a.secretKey.slice(0, 32), 0);
+  tampered.set(b.publicKey.toBytes(), 32); // a real seed, but someone else's real public half
+  await assert.rejects(lightweightKeypairFromSecretKey(tampered), /does not match/);
+});
+
+test('lightweightKeypairFromSecretKey rejects the wrong length', async () => {
+  await assert.rejects(lightweightKeypairFromSecretKey(new Uint8Array(32)), /64-byte/);
 });

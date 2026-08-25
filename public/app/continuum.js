@@ -18,6 +18,7 @@ function noIdentity(root) {
         <div class="glyph">\u25CB</div>
         No identity yet. Value accrues to a real Ed25519 keypair \u2014 the same one used to ignite on Solana.
         <div class="btn-row" style="justify-content:center"><button class="primary" id="gen">Create identity</button></div>
+        <div id="gen-msg"></div>
       </div>
     </div>
     ${hasSavedKey() ? `
@@ -34,7 +35,20 @@ function noIdentity(root) {
       <div id="import-msg"></div>
     </div>
   `;
-  root.querySelector('#gen').addEventListener('click', async () => { await activateWithNewKeypair(); render(); });
+  root.querySelector('#gen').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const msgEl = root.querySelector('#gen-msg');
+    btn.disabled = true;
+    btn.textContent = 'Creating\u2026';
+    try {
+      await activateWithNewKeypair();
+      render();
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = 'Create identity';
+      msgEl.innerHTML = `<div class="msg error">${err?.message ?? String(err)}</div>`;
+    }
+  });
   const unlockBtn = root.querySelector('#unlock');
   if (unlockBtn) unlockBtn.addEventListener('click', async () => {
     const msgEl = root.querySelector('#unlock-msg');
