@@ -1,6 +1,7 @@
 import { state, short } from './state.js';
 import { render, rematerialize } from './app.js';
 import { exportHistory, importHistory, buildReceptionCommitment } from './reconciliation.js';
+import { disconnect } from './identity.js';
 import { computeResidualDiversity } from '../core/mirror.js';
 
 let lastMsg = null;
@@ -78,7 +79,10 @@ export function renderMirror(root) {
   root.innerHTML = `
     <div class="top-bar">
       <div class="wordmark">AIWA <em>chain</em></div>
-      <div class="address-chip" id="addr-copy" title="Click to copy">${short(state.domainId, 10)}</div>
+      <div style="display:flex; align-items:center; gap:8px">
+        <div class="address-chip" id="addr-copy" title="Click to copy">${short(state.domainId, 10)}</div>
+        <button class="ghost" id="disconnect-btn" style="padding:5px 10px; font-size:11px">Disconnect</button>
+      </div>
     </div>
     <div class="tabs">
       <div class="tab" data-tab="continuum">Continuum</div>
@@ -121,6 +125,11 @@ export function renderMirror(root) {
 
   root.querySelectorAll('.tab').forEach((el) => el.addEventListener('click', () => { state.activeTab = el.dataset.tab; render(); }));
   root.querySelector('#addr-copy').addEventListener('click', () => navigator.clipboard?.writeText(state.domainId));
+  root.querySelector('#disconnect-btn').addEventListener('click', () => {
+    if (!confirm('Disconnect from this identity? Your real history stays saved on this device (IndexedDB) and can be restored with your secret key \u2014 this only stops acting as it right now.')) return;
+    disconnect();
+    render();
+  });
 
   root.querySelector('#export-btn').addEventListener('click', () => {
     const count = exportHistory(state.dag, state.domainId);
