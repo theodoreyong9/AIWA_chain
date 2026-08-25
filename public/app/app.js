@@ -19,7 +19,15 @@ const DB_NAME = 'aiwa-chain-local';
 // guaranteed stability once a local DAG holds more than one domain's
 // events (see state-snapshot.js's own header).
 let coveredEventIds = new Set();
-let eventsSinceSnapshot = 0;
+// Real wall-clock time since the last snapshot save — robust to
+// frequent reloads, unlike a pure event count, which is just an
+// in-memory variable that resets to zero on every single page load.
+// A short session that reloads often would otherwise never
+// accumulate enough events to ever trigger a save, letting real
+// catch-up backlog grow across many short sessions instead of being
+// bounded by one real time window.
+let lastSnapshotAt = 0;
+const SNAPSHOT_INTERVAL_MS = 5000;
 
 // The real, ongoing VDF computation runs on a dedicated worker thread
 // — see vdf-worker.js's own header for why. One worker, reused across
@@ -89,13 +97,13 @@ async function applyIncremental(id, parents, payload) {
   maybeSnapshot();
 }
 
-// Saves a real snapshot every 25 events — frequent enough that a
-// reload never has much real backlog left to re-verify, infrequent
-// enough not to add real, felt overhead to every single epoch.
+// Saves a real snapshot at most every 5 real seconds — bounded catch-up
+// backlog regardless of how many times the tab gets reloaded in
+// between, unlike a pure event counter that resets on every load.
 function maybeSnapshot() {
-  eventsSinceSnapshot += 1;
-  if (eventsSinceSnapshot < 25) return;
-  eventsSinceSnapshot = 0;
+  const now = Date.now();
+  if (now - lastSnapshotAt < SNAPSHOT_INTERVAL_MS) return;
+  lastSnapshotAt = now;
   saveSnapshot([...coveredEventIds], state.wallet).catch((err) => console.error('Snapshot save failed:', err));
 }
 
@@ -137,6 +145,7 @@ export function render() {
 }
 
 async function boot() {
+  lastSnapshotAt = Date.now(); // avoids an immediate, redundant re-save of what boot() itself just loaded
   const root = document.getElementById('app');
   const showProgress = (done, total, label) => {
     const pct = total > 0 ? Math.round((done / total) * 100) : 100;
