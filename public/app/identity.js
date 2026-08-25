@@ -1,5 +1,5 @@
 import { deriveDomainId } from '../core/domain-id.js';
-import { generateKeypair, keypairFromSecretKey, encryptSecretKey, decryptSecretKey, loadSolanaWeb3 } from '../core/solana-wallet.js';
+import { generateLightweightKeypair, lightweightKeypairFromSecretKey, encryptSecretKey, decryptSecretKey } from '../core/solana-wallet.js';
 import { state, notify } from './state.js';
 import { startProgressionLoop, rematerialize } from './app.js';
 
@@ -13,13 +13,11 @@ async function finishActivation(kp) {
 }
 
 export async function activateWithNewKeypair() {
-  const solanaWeb3 = await loadSolanaWeb3();
-  await finishActivation(generateKeypair(solanaWeb3));
+  await finishActivation(await generateLightweightKeypair());
 }
 
 export async function activateWithSecretKeyBytes(bytes) {
-  const solanaWeb3 = await loadSolanaWeb3();
-  await finishActivation(keypairFromSecretKey(solanaWeb3, bytes));
+  await finishActivation(await lightweightKeypairFromSecretKey(bytes));
 }
 
 export function hasSavedKey() {
