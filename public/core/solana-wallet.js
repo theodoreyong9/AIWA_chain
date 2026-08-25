@@ -62,12 +62,8 @@ export async function broadcastBurnTransaction(solanaWeb3, connection, keypair, 
 
 export async function loadSolanaWeb3() {
   if (typeof window !== 'undefined' && window.solanaWeb3) return window.solanaWeb3;
-  await new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = 'https://unpkg.com/@solana/web3.js@1.98.0/lib/index.iife.min.js';
-    script.onload = resolve;
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
-  return window.solanaWeb3;
+  const timeout = (ms) => new Promise((_, reject) => setTimeout(() => reject(new Error(`Loading @solana/web3.js timed out after ${ms / 1000}s`)), ms));
+  const mod = await Promise.race([import('https://esm.sh/@solana/web3.js@1.98.0'), timeout(15000)]);
+  if (typeof window !== 'undefined') window.solanaWeb3 = mod;
+  return mod;
 }
