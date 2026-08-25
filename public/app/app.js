@@ -39,6 +39,11 @@ async function progressionLoop() {
     state.lastEventId = newId;
     state.lastEpochAt = Date.now();
     await rematerialize();
+    // A real, explicit yield between epochs too — belt and suspenders
+    // alongside vdf.js's own internal yields, so the browser always
+    // gets a real chance to paint, handle input, and process a reload
+    // request between one epoch finishing and the next beginning.
+    await new Promise((resolve) => setTimeout(resolve, 0));
   }
   progressionLoopRunning = false;
 }
