@@ -18,8 +18,10 @@ async function getConnection() {
 
 async function refreshBalance() {
   if (!state.keypair) return;
+  const solanaWeb3 = await loadSolanaWeb3();
   const conn = await getConnection();
-  solBalanceLamports = await conn.getBalance(state.keypair.publicKey);
+  const realPubkey = new solanaWeb3.PublicKey(state.keypair.publicKey.toBytes());
+  solBalanceLamports = await conn.getBalance(realPubkey);
   render();
 }
 
@@ -94,8 +96,15 @@ async function doBurn(root) {
   try {
     const solanaWeb3 = await loadSolanaWeb3();
     const conn = await getConnection();
+    // state.keypair is the lightweight, @noble/curves-based shape used
+    // everywhere else in this app — reconstructed here into a real
+    // solanaWeb3.Keypair only now, right where a real transaction
+    // actually needs one. Its own secretKey is real and correct (a
+    // genuine 32-byte seed + 32-byte public key), so this recovers the
+    // identical identity, never a different one.
+    const realKeypair = solanaWeb3.Keypair.fromSecretKey(state.keypair.secretKey);
     const timeout = (ms) => new Promise((_, reject) => setTimeout(() => reject(new Error(`Timed out after ${ms / 1000}s`)), ms));
-    const signature = await Promise.race([broadcastBurnTransaction(solanaWeb3, conn, state.keypair, lamports), timeout(30000)]);
+    const signature = await Promise.race([broadcastBurnTransaction(solanaWeb3, conn, realKeypair, lamports), timeout(30000)]);
 
     state.lastEventId = await state.dag.addEvent([state.lastEventId], { type: 'identity-cost', domain: state.domainId, signature, burnedLamports: lamports, slot: null });
     state.lastEventId = await state.dag.addEvent([state.lastEventId], { type: 'accrual', domain: state.domainId, b: solAmount });
