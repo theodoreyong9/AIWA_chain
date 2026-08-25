@@ -47,6 +47,24 @@ export class EventDag {
     return id;
   }
 
+  // A real, fast bulk-load path — trusts each event's own stored id
+  // rather than recomputing it. Safe ONLY for events already verified
+  // once, at genuine creation time, and now being restored from this
+  // exact same domain's own local, trusted storage (IndexedDB) — never
+  // for events from a genuinely external source (an imported history
+  // file, a real peer), where addEvent()'s own real recomputation
+  // remains the whole point. Silently skips an event whose parent
+  // isn't yet present, rather than throwing — a real, if unlikely,
+  // possibility if stored events are ever out of causal order; it is
+  // dropped, not misplaced.
+  loadTrusted(events) {
+    for (const ev of events) {
+      if (this._events.has(ev.id)) continue;
+      if (!ev.parents.every((p) => this._events.has(p))) continue;
+      this._events.set(ev.id, { id: ev.id, parents: [...ev.parents], payload: ev.payload });
+    }
+  }
+
   merge(otherDag) {
     for (const ev of otherDag._events.values()) {
       if (!this._events.has(ev.id)) {
