@@ -1,0 +1,109 @@
+import { state, short } from './state.js';
+import { render, rematerialize } from './app.js';
+import { networkConfigDevnet } from './network.js';
+import { loadSolanaWeb3, broadcastBurnTransaction } from '../core/solana-wallet.js';
+import { hasIdentityCost } from '../core/identity-cost.js';
+
+let connection = null;
+let solBalanceLamports = null;
+let busy = false;
+let lastMsg = null;
+
+async function getConnection() {
+  if (connection) return connection;
+  const solanaWeb3 = await loadSolanaWeb3();
+  connection = new solanaWeb3.Connection(networkConfigDevnet.rpcEndpoint, 'confirmed');
+  return connection;
+}
+
+async function refreshBalance() {
+  if (!state.keypair) return;
+  const conn = await getConnection();
+  solBalanceLamports = await conn.getBalance(state.keypair.publicKey);
+  render();
+}
+
+let lastRefreshedFor = null;
+
+export function renderIgnition(root) {
+  if (!state.domainId) {
+    root.innerHTML = `
+      <div class="top-bar"><div class="wordmark">AIWA <em>chain</em></div></div>
+      <div class="empty-state"><div class="glyph">\u25CB</div>No identity yet \u2014 create one in Continuum first.</div>
+    `;
+    return;
+  }
+
+  if (lastRefreshedFor !== state.domainId) {
+    lastRefreshedFor = state.domainId;
+    refreshBalance();
+  }
+
+  const balance = solBalanceLamports !== null ? (solBalanceLamports / 1e9).toFixed(6) : '\u2014';
+  const already = hasIdentityCost(state.identityCost, state.domainId);
+
+  root.innerHTML = `
+    <div class="top-bar">
+      <div class="wordmark">AIWA <em>chain</em></div>
+      <div class="address-chip" id="addr-copy" title="Click to copy">${short(state.keypair.publicKey.toBase58(), 10)}</div>
+    </div>
+    <div class="tabs">
+      <div class="tab" data-tab="continuum">Continuum</div>
+      <div class="tab" data-tab="mirror">Mirror</div>
+      <div class="tab active" data-tab="ignition">Ignition</div>
+    </div>
+
+    <div class="hero">
+      <div class="hero-balance">${balance}</div>
+      <div class="hero-unit">SOL \u00b7 devnet</div>
+      <div class="status-line"><span class="status-dot ${already ? 'continuous' : 'partitioned'}"></span>${already ? 'ignited' : 'not yet ignited'}</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Ignite</div>
+      <p class="hint">One real, irreversible burn \u2014 the same key that holds SOL is the key AIWA accrues to. No separate AIWA key to create.</p>
+      <label class="field-label">Amount (SOL)</label>
+      <input type="text" id="burn-amount" placeholder="0.002" value="0.002" />
+      <div class="btn-row"><button class="primary" id="burn-btn" ${busy ? 'disabled' : ''}>Burn & ignite</button></div>
+      <div id="burn-msg">${lastMsg ?? ''}</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Refresh</div>
+      <div class="btn-row"><button id="refresh-btn">Refresh SOL balance</button></div>
+    </div>
+  `;
+
+  root.querySelectorAll('.tab').forEach((el) => el.addEventListener('click', () => { state.activeTab = el.dataset.tab; render(); }));
+  root.querySelector('#addr-copy').addEventListener('click', () => navigator.clipboard?.writeText(state.keypair.publicKey.toBase58()));
+  root.querySelector('#refresh-btn').addEventListener('click', refreshBalance);
+  root.querySelector('#burn-btn').addEventListener('click', () => doBurn(root));
+}
+
+async function doBurn(root) {
+  if (busy) return;
+  busy = true;
+  const msgEl = root.querySelector('#burn-msg');
+  const solAmount = parseFloat(root.querySelector('#burn-amount').value);
+  const setMsg = (html) => { msgEl.innerHTML = html; lastMsg = html; };
+
+  if (!Number.isFinite(solAmount) || solAmount <= 0) { setMsg(`<div class="msg error">Enter a positive SOL amount.</div>`); busy = false; return; }
+  const lamports = Math.round(solAmount * 1e9);
+
+  setMsg(`<div class="msg">Broadcasting to devnet\u2026 (times out after 30s)</div>`);
+  try {
+    const solanaWeb3 = await loadSolanaWeb3();
+    const conn = await getConnection();
+    const timeout = (ms) => new Promise((_, reject) => setTimeout(() => reject(new Error(`Timed out after ${ms / 1000}s`)), ms));
+    const signature = await Promise.race([broadcastBurnTransaction(solanaWeb3, conn, state.keypair, lamports), timeout(30000)]);
+
+    state.lastEventId = await state.dag.addEvent([state.lastEventId], { type: 'identity-cost', domain: state.domainId, signature, burnedLamports: lamports, slot: null });
+    state.lastEventId = await state.dag.addEvent([state.lastEventId], { type: 'accrual', domain: state.domainId, b: solAmount });
+    await rematerialize();
+    setMsg(`<div class="msg ok">Ignited \u2014 signature ${short(signature, 8)}. Real accrual is now running in Continuum.</div>`);
+  } catch (e) {
+    setMsg(`<div class="msg error">Burn failed: ${e.message}. Check the devnet faucet if your balance is too low.</div>`);
+  }
+  busy = false;
+  refreshBalance();
+}
