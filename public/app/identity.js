@@ -54,4 +54,5 @@ export function disconnect() {
   state.mirror = null;
   state.identityCost = null;
   state.causalTick = null;
+  state.activeTab = 'continuum'; // Ignition/Mirror's own no-identity screens have no way back — always land somewhere with real navigation
 }

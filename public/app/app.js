@@ -4,7 +4,6 @@ import { materializeWallet, applyWalletEvent, initialWalletState } from '../core
 import { materializeMirror, deriveSourceEpochLookup } from '../core/mirror.js';
 import { computeCausalTick } from '../core/causal-tick.js';
 import { deriveIdentityCostState } from './identity-cost-view.js';
-import { vdfSeed, computeVdfChain } from '../core/vdf.js';
 import { saveSnapshot, loadSnapshot } from './state-snapshot.js';
 import { state, REWARD_PARAMS, VDF_ITERATIONS, notify } from './state.js';
 import { renderContinuum } from './continuum.js';
@@ -13,6 +12,38 @@ import { renderMirror } from './mirror-view.js';
 
 const DB_NAME = 'aiwa-chain-local';
 let eventsSinceSnapshot = 0;
+
+// The real, ongoing VDF computation runs on a dedicated worker thread
+// — see vdf-worker.js's own header for why. One worker, reused across
+// every epoch; a request/response pattern (rather than one-shot
+// worker-per-epoch) avoids real, repeated worker start-up cost.
+let vdfWorker = null;
+let requestCounter = 0;
+const pendingRequests = new Map();
+
+function getVdfWorker() {
+  if (!vdfWorker) {
+    vdfWorker = new Worker(new URL('./vdf-worker.js', import.meta.url), { type: 'module' });
+    vdfWorker.onmessage = (e) => {
+      const { requestId, vdfOutput } = e.data;
+      const resolve = pendingRequests.get(requestId);
+      if (resolve) {
+        pendingRequests.delete(requestId);
+        resolve(vdfOutput);
+      }
+    };
+  }
+  return vdfWorker;
+}
+
+function computeVdfOnWorker(domain, previousOutput, iterations) {
+  const worker = getVdfWorker();
+  const requestId = ++requestCounter;
+  return new Promise((resolve) => {
+    pendingRequests.set(requestId, resolve);
+    worker.postMessage({ requestId, domain, previousOutput, iterations });
+  });
+}
 
 async function rematerialize() {
   const events = state.dag.topoOrder();
@@ -46,8 +77,11 @@ async function progressionLoop() {
     const epoch = (progression?.epoch ?? 0) + 1;
     const previousOutput = progression?.vdfOutput ?? 'genesis';
     const lastId = progression?.lastId ?? state.genesisId;
-    const seed = vdfSeed(domain, previousOutput);
-    const vdfOutput = await computeVdfChain(seed, VDF_ITERATIONS);
+    // The real, heavy computation happens off this thread entirely —
+    // the main thread stays free to render and handle input for the
+    // full duration of each epoch, not just during vdf.js's own
+    // internal yields.
+    const vdfOutput = await computeVdfOnWorker(domain, previousOutput, VDF_ITERATIONS);
     if (!state.keypair || state.domainId !== domain) break; // identity changed mid-computation — discard, do not misattribute
     const payload = { type: 'progression', domain, epoch, vdfIterations: VDF_ITERATIONS, vdfOutput };
     const newId = await state.dag.addEvent([lastId], payload);
@@ -56,21 +90,9 @@ async function progressionLoop() {
     // A real, incremental update — apply just this ONE new event to
     // the already-materialized wallet state, rather than re-folding
     // and re-verifying the domain's entire progression history again.
-    // A full rematerialize() here, every single epoch, would make each
-    // new epoch re-verify every prior one too — real O(n^2) work over
-    // a session, growing without bound the longer this loop runs. Mirror,
-    // identity-cost, and the causal tick are unaffected by this
-    // domain's own progression advancing, so they are left as they are;
-    // they still get a real, full refresh after any reconciliation or
-    // other action via rematerialize() itself.
     state.wallet = await applyWalletEvent(REWARD_PARAMS, state.wallet, { id: newId, parents: [lastId], payload });
     notify();
     maybeSnapshot(state.dag.topoOrder());
-    // A real, explicit yield between epochs too — belt and suspenders
-    // alongside vdf.js's own internal yields, so the browser always
-    // gets a real chance to paint, handle input, and process a reload
-    // request between one epoch finishing and the next beginning.
-    await new Promise((resolve) => setTimeout(resolve, 0));
   }
   progressionLoopRunning = false;
 }

@@ -32,8 +32,14 @@ export function renderIgnition(root) {
   if (!state.domainId) {
     root.innerHTML = `
       <div class="top-bar"><div class="wordmark">AIWA <em>chain</em></div></div>
+      <div class="tabs">
+        <div class="tab" data-tab="continuum">Continuum</div>
+        <div class="tab" data-tab="mirror">Mirror</div>
+        <div class="tab active" data-tab="ignition">Ignition</div>
+      </div>
       <div class="empty-state"><div class="glyph">\u25CB</div>No identity yet \u2014 create one in Continuum first.</div>
     `;
+    root.querySelectorAll('.tab').forEach((el) => el.addEventListener('click', () => { state.activeTab = el.dataset.tab; render(); }));
     return;
   }
 
