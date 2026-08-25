@@ -134,9 +134,13 @@ export async function applyWalletEvent(rewardParams, state, event) {
   return state;
 }
 
-export async function materializeWallet(rewardParams, orderedEvents) {
+export async function materializeWallet(rewardParams, orderedEvents, onProgress) {
   let state = initialWalletState();
-  for (const event of orderedEvents) state = await applyWalletEvent(rewardParams, state, event);
+  for (let i = 0; i < orderedEvents.length; i++) {
+    state = await applyWalletEvent(rewardParams, state, orderedEvents[i]);
+    if (onProgress && i % 20 === 0) onProgress(i + 1, orderedEvents.length);
+  }
+  if (onProgress) onProgress(orderedEvents.length, orderedEvents.length);
   return state;
 }
 
