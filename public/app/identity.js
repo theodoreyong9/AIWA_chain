@@ -40,3 +40,18 @@ export async function unlockSavedKey(password) {
 export function clearSavedKey() {
   localStorage.removeItem(SAVED_KEY_STORAGE);
 }
+
+// Stops acting as the current identity — the progression loop's own
+// `while (state.keypair)` naturally exits once this clears, after
+// finishing whatever epoch is already mid-computation. Never touches
+// the real, persisted DAG history (IndexedDB) or a separately-saved
+// encrypted key (clearSavedKey is a distinct, deliberate action) —
+// only the in-memory "who am I acting as right now" state.
+export function disconnect() {
+  state.keypair = null;
+  state.domainId = null;
+  state.wallet = null;
+  state.mirror = null;
+  state.identityCost = null;
+  state.causalTick = null;
+}
