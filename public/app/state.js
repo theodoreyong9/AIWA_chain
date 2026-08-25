@@ -10,6 +10,7 @@ export const state = {
   identityCost: null, // last materialized identity-cost state — real burns, the real weight source for causalTick
   causalTick: null, // this domain's own externally-corroborated position, or null if no real evidence exists yet
   mirrorEpoch: 0, // this domain's own real reception-commitment sequence number — distinct from progression epoch, incremented once per real, signed commitment
+  importedDomains: new Set(), // domains genuinely brought in via a real reconciliation.js import — never a raw scan of local storage, which would also catch this browser's own earlier, disconnected-from identities
   lastEpochAt: 0,
   busy: {},
 };

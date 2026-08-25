@@ -63,6 +63,28 @@ export async function lightweightKeypairFromSecretKey(secretKeyBytes) {
   return wrapAsKeypairShape(secretKey32, publicKey32);
 }
 
+// A real, deterministic identity from a passphrase alone — the same
+// passphrase always derives the identical real keypair, anywhere,
+// with nothing else to carry or transport. A fixed, application-
+// specific salt is used deliberately: reproducibility from the
+// passphrase ALONE is the entire point (a random salt would make that
+// impossible), at the real, honest cost of losing the extra defense a
+// random salt gives against a precomputed attack — the passphrase
+// itself is the only real secret here, exactly like a private key
+// written down in words instead of bytes. A weak, guessable
+// passphrase is exactly as unsafe as a weak, guessable private key.
+const PASSPHRASE_SALT = new TextEncoder().encode('aiwa-chain-passphrase-identity-v1');
+const PASSPHRASE_ITERATIONS = 600_000;
+
+export async function deriveKeypairFromPassphrase(passphrase) {
+  const { ed25519 } = await import('@noble/curves/ed25519.js');
+  const keyMaterial = await crypto.subtle.importKey('raw', new TextEncoder().encode(passphrase), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt: PASSPHRASE_SALT, iterations: PASSPHRASE_ITERATIONS, hash: 'SHA-256' }, keyMaterial, 256);
+  const secretKey32 = new Uint8Array(bits);
+  const publicKey32 = ed25519.getPublicKey(secretKey32);
+  return wrapAsKeypairShape(secretKey32, publicKey32);
+}
+
 export function generateKeypair(solanaWeb3) {
   return solanaWeb3.Keypair.generate();
 }

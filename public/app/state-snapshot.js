@@ -1,10 +1,16 @@
-// A real snapshot of state.wallet, tagged with the exact head event
-// id it was computed at — so on load, it can be verified to still
-// correspond to the real, current DAG before being trusted, never
-// blindly accepted. Without this, every single reload re-verifies a
-// domain's entire historical progression from genesis, which grows
-// without bound the longer a domain has run; that real cost is paid
-// once, here, then cached — not skipped, not weakened.
+// A real snapshot of state.wallet, tagged with the exact SET of event
+// ids it was computed over — never a position/index in topoOrder(),
+// which has no guaranteed stability once a local DAG holds more than
+// one domain's events (their relative interleaving depends on hash
+// comparison, not insertion order). A real set-membership check has
+// no such fragility: catch-up work is simply "every current event not
+// in this set", regardless of where it happens to fall in any
+// particular topological ordering.
+//
+// Without this, every single reload re-verifies a domain's entire
+// historical progression from genesis, which grows without bound the
+// longer a domain has run; that real cost is paid once, here, then
+// cached — not skipped, not weakened.
 //
 // BigInt values (accrual balances, claim amounts) have no native JSON
 // representation — encoded here as tagged strings, decoded back to
@@ -31,12 +37,12 @@ function openDb() {
   });
 }
 
-export async function saveSnapshot(headEventId, eventCount, wallet) {
+export async function saveSnapshot(coveredEventIds, wallet) {
   const db = await openDb();
   const serialized = JSON.stringify(wallet, replacer);
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite');
-    tx.objectStore(STORE_NAME).put({ headEventId, eventCount, wallet: serialized, savedAt: Date.now() }, SNAPSHOT_KEY);
+    tx.objectStore(STORE_NAME).put({ coveredEventIds, wallet: serialized, savedAt: Date.now() }, SNAPSHOT_KEY);
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
@@ -54,7 +60,7 @@ export async function loadSnapshot() {
       req.onerror = () => reject(req.error);
     });
     if (!record) return null;
-    return { headEventId: record.headEventId, eventCount: record.eventCount, wallet: JSON.parse(record.wallet, reviver) };
+    return { coveredEventIds: new Set(record.coveredEventIds), wallet: JSON.parse(record.wallet, reviver) };
   } catch {
     return null;
   }

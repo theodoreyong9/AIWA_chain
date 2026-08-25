@@ -4,6 +4,7 @@ import * as solanaWeb3 from '@solana/web3.js';
 import {
   generateKeypair, keypairFromSecretKey, encryptSecretKey, decryptSecretKey,
   buildBurnTransaction, signAndSerialize, generateLightweightKeypair, lightweightKeypairFromSecretKey,
+  deriveKeypairFromPassphrase,
 } from '../public/core/solana-wallet.js';
 import { SOLANA_INCINERATOR_ADDRESS } from '../public/core/identity-cost.js';
 
@@ -85,4 +86,24 @@ test('SECURITY: lightweightKeypairFromSecretKey rejects a secret key whose embed
 
 test('lightweightKeypairFromSecretKey rejects the wrong length', async () => {
   await assert.rejects(lightweightKeypairFromSecretKey(new Uint8Array(32)), /64-byte/);
+});
+
+test('THE REAL PROPERTY: the same passphrase derives the identical real identity, every time', async () => {
+  const a = await deriveKeypairFromPassphrase('correct horse battery staple');
+  const b = await deriveKeypairFromPassphrase('correct horse battery staple');
+  assert.equal(a.publicKey.toBase58(), b.publicKey.toBase58());
+  assert.deepEqual(Array.from(a.secretKey), Array.from(b.secretKey));
+});
+
+test('a different passphrase derives a different, real identity', async () => {
+  const a = await deriveKeypairFromPassphrase('passphrase one');
+  const b = await deriveKeypairFromPassphrase('passphrase two');
+  assert.notEqual(a.publicKey.toBase58(), b.publicKey.toBase58());
+});
+
+test('deriveKeypairFromPassphrase produces a real, usable keypair shape', async () => {
+  const kp = await deriveKeypairFromPassphrase('a real test passphrase');
+  assert.equal(kp.secretKey.length, 64);
+  assert.equal(kp.publicKey.toBytes().length, 32);
+  assert.equal(typeof kp.publicKey.toBase58(), 'string');
 });

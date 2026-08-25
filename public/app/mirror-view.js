@@ -2,22 +2,51 @@ import { state, short } from './state.js';
 import { render, rematerialize } from './app.js';
 import { exportHistory, importHistory, buildReceptionCommitment } from './reconciliation.js';
 import { disconnect } from './identity.js';
-import { computeResidualDiversity } from '../core/mirror.js';
+import { computeResidualDiversity, deriveSourceEpochLookup } from '../core/mirror.js';
 
 let lastMsg = null;
 
-function observedDomains() {
+// Real domains this identity has actually, verifiably committed to
+// having observed — read from state.mirror's own real reception
+// commitments, never a raw scan of every progression event sitting in
+// local storage. Without this distinction, a domain's OWN earlier,
+// disconnected-from identity (its progression events never removed
+// from this same browser's IndexedDB) would appear as a genuinely
+// "observed" external domain, which it never was. This is what the
+// entropic-space chart shows.
+function verifiedObservedDomains() {
   const seen = new Map(); // domain -> { lastEventId, eventCount }
-  for (const event of state.dag.topoOrder()) {
-    const d = event.payload?.domain;
-    if (!d || d === state.domainId) continue;
-    if (event.payload?.type !== 'progression') continue;
-    const entry = seen.get(d) ?? { lastEventId: null, eventCount: 0 };
-    entry.lastEventId = event.id;
-    entry.eventCount += 1;
-    seen.set(d, entry);
+  const lookup = deriveSourceEpochLookup(state.dag.topoOrder());
+  const myCommitments = state.mirror?.commitments?.[state.domainId] ?? [];
+  for (const commitment of myCommitments) {
+    for (const ref of commitment.receivedFrom) {
+      if (ref.sourceDomain === state.domainId) continue;
+      if (lookup(ref.sourceDomain, ref.eventId) === null) continue; // a stale or unresolved reference — not real, not counted
+      const entry = seen.get(ref.sourceDomain) ?? { lastEventId: null, eventCount: 0 };
+      entry.lastEventId = ref.eventId;
+      entry.eventCount += 1;
+      seen.set(ref.sourceDomain, entry);
+    }
   }
   return seen;
+}
+
+// Domains genuinely brought in via a real import (state.importedDomains,
+// populated only by reconciliation.js's own importHistory — never a
+// raw DAG scan, for the identical reason above), minus ones already
+// committed. This is the "you could commit to these" list.
+function pendingImportDomains() {
+  const lookup = deriveSourceEpochLookup(state.dag.topoOrder());
+  const alreadyCommitted = verifiedObservedDomains();
+  const pending = new Map();
+  for (const domainId of state.importedDomains) {
+    if (domainId === state.domainId || alreadyCommitted.has(domainId)) continue;
+    const progressionEvents = state.dag.topoOrder().filter((e) => e.payload?.type === 'progression' && e.payload?.domain === domainId);
+    if (progressionEvents.length === 0) continue;
+    const last = progressionEvents[progressionEvents.length - 1];
+    pending.set(domainId, { lastEventId: last.id, eventCount: progressionEvents.length });
+  }
+  return pending;
 }
 
 // A real, deterministic angle from a stable hash of the domain id —
@@ -80,7 +109,8 @@ export function renderMirror(root) {
     return;
   }
 
-  const domains = observedDomains();
+  const verifiedDomains = verifiedObservedDomains();
+  const pendingDomains = pendingImportDomains();
 
   root.innerHTML = `
     <div class="top-bar">
@@ -105,7 +135,7 @@ export function renderMirror(root) {
           ? `<div class="row"><span class="row-label">Your own residual diversity</span><span class="row-value">H=${diversity.entropy.toFixed(2)} across ${diversity.distinctSources} source${diversity.distinctSources === 1 ? '' : 's'}</span></div>`
           : '';
       })()}
-      ${entropicSpaceSvg(domains)}
+      ${entropicSpaceSvg(verifiedDomains)}
     </div>
 
     <div class="card">
@@ -119,8 +149,9 @@ export function renderMirror(root) {
     </div>
 
     <div class="card">
-      <div class="card-title">Observed domains (${domains.size})</div>
-      ${domains.size === 0 ? '<div class="hint">None yet.</div>' : [...domains.entries()].map(([d, info]) => `
+      <div class="card-title">Imported, not yet committed (${pendingDomains.size})</div>
+      <p class="hint">Real history now present locally from an import \u2014 committing signs a real, verifiable statement that you've actually seen it.</p>
+      ${pendingDomains.size === 0 ? '<div class="hint">None yet.</div>' : [...pendingDomains.entries()].map(([d, info]) => `
         <div class="list-row">
           <div style="flex:1"><div class="mono-id">${short(d, 16)}</div><div class="hint">${info.eventCount} real event${info.eventCount === 1 ? '' : 's'} known</div></div>
           <button data-commit="${d}">Commit reception</button>
@@ -148,7 +179,8 @@ export function renderMirror(root) {
     const file = root.querySelector('#import-file').files?.[0];
     if (!file) { msgEl.innerHTML = `<div class="msg error">Choose a file first.</div>`; return; }
     try {
-      const { imported, alreadyPresent, sourceDomain } = await importHistory(state.dag, file);
+      const { imported, alreadyPresent, sourceDomain, importedDomains } = await importHistory(state.dag, file);
+      for (const d of importedDomains) state.importedDomains.add(d);
       lastMsg = `<div class="msg ok">${imported} event${imported === 1 ? '' : 's'} imported${alreadyPresent > 0 ? `, ${alreadyPresent} already known` : ''}${sourceDomain ? ` from ${short(sourceDomain, 8)}` : ''}.</div>`;
       await rematerialize();
       render();
@@ -158,7 +190,7 @@ export function renderMirror(root) {
   });
 
   root.querySelectorAll('[data-commit]').forEach((btn) => {
-    btn.addEventListener('click', () => doCommitReception(root, btn.dataset.commit, domains.get(btn.dataset.commit)));
+    btn.addEventListener('click', () => doCommitReception(root, btn.dataset.commit, pendingDomains.get(btn.dataset.commit)));
   });
 }
 

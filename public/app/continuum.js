@@ -1,6 +1,6 @@
 import { state, short, REWARD_PARAMS } from './state.js';
-import { render, rematerialize } from './app.js';
-import { activateWithNewKeypair, activateWithSecretKeyBytes, hasSavedKey, saveCurrentKey, unlockSavedKey, clearSavedKey, disconnect } from './identity.js';
+import { render, applyIncremental } from './app.js';
+import { activateWithNewKeypair, activateWithSecretKeyBytes, activateWithPassphrase, hasSavedKey, saveCurrentKey, unlockSavedKey, clearSavedKey, disconnect } from './identity.js';
 import { claimableNow } from '../core/accrual.js';
 import { spendableClaims, totalBalance, buildSignedTransferEvent, buildSignedSplitEvent } from '../core/wallet.js';
 import { format as formatAiwaAmount, toUnits, fromUnits } from '../core/units.js';
@@ -29,6 +29,13 @@ function noIdentity(root) {
       <div id="unlock-msg"></div>
     </div>` : ''}
     <div class="card">
+      <div class="card-title">Open with a passphrase</div>
+      <p class="hint">The same real identity, anywhere \u2014 the identical passphrase always derives the identical keypair, on any device, with nothing else to carry. A weak passphrase is exactly as unsafe as a weak private key.</p>
+      <input type="password" id="passphrase-input" placeholder="a real passphrase, the more words the better" />
+      <div class="btn-row"><button class="primary" id="passphrase-btn">Open</button></div>
+      <div id="passphrase-msg"></div>
+    </div>
+    <div class="card">
       <div class="card-title">Or restore an existing key</div>
       <input type="password" id="import-key" placeholder="comma-separated secret key bytes" />
       <div class="btn-row"><button id="import">Restore</button></div>
@@ -53,6 +60,13 @@ function noIdentity(root) {
   if (unlockBtn) unlockBtn.addEventListener('click', async () => {
     const msgEl = root.querySelector('#unlock-msg');
     try { await unlockSavedKey(root.querySelector('#unlock-pw').value); render(); }
+    catch (e) { msgEl.innerHTML = `<div class="msg error">${e.message}</div>`; }
+  });
+  root.querySelector('#passphrase-btn').addEventListener('click', async () => {
+    const msgEl = root.querySelector('#passphrase-msg');
+    const passphrase = root.querySelector('#passphrase-input').value;
+    if (!passphrase) { msgEl.innerHTML = `<div class="msg error">Enter a passphrase.</div>`; return; }
+    try { await activateWithPassphrase(passphrase); render(); }
     catch (e) { msgEl.innerHTML = `<div class="msg error">${e.message}</div>`; }
   });
   const forgetBtn = root.querySelector('#forget');
@@ -216,8 +230,14 @@ function activeContinuum(root) {
   if (claimBtn) claimBtn.addEventListener('click', async () => {
     const claimId = crypto.randomUUID();
     const amount = fromUnits(claimable);
-    state.lastEventId = await state.dag.addEvent([state.lastEventId], { type: 'claim', domain: state.domainId, claimId, amount });
-    await rematerialize();
+    const payload = { type: 'claim', domain: state.domainId, claimId, amount };
+    const parents = [state.lastEventId];
+    const newId = await state.dag.addEvent(parents, payload);
+    state.lastEventId = newId;
+    // A real, incremental update — apply just this one new event,
+    // never a full re-fold and re-verification of the whole history
+    // for a single user action.
+    await applyIncremental(newId, parents, payload);
     render();
   });
 
@@ -248,26 +268,40 @@ async function doSend(root, claims, accruedUnclaimed) {
   const exact = claims.find((c) => c.amount === amount);
   const covering = claims.filter((c) => c.amount > amount).sort((a, b) => (a.amount < b.amount ? -1 : 1))[0];
 
+  // A real, incremental update throughout — each event applied
+  // directly to the already-materialized state as it's posted, never
+  // a full re-fold of the whole history for a single user action.
   try {
     let claimIdToSend;
     if (exact) {
       claimIdToSend = exact.id;
     } else if (accruedUnclaimed >= amount) {
       claimIdToSend = crypto.randomUUID();
-      state.lastEventId = await state.dag.addEvent([state.lastEventId], { type: 'claim', domain: state.domainId, claimId: claimIdToSend, amount: raw });
+      const payload = { type: 'claim', domain: state.domainId, claimId: claimIdToSend, amount: raw };
+      const parents = [state.lastEventId];
+      const newId = await state.dag.addEvent(parents, payload);
+      state.lastEventId = newId;
+      await applyIncremental(newId, parents, payload);
     } else if (covering) {
       const firstId = crypto.randomUUID();
       const secondId = crypto.randomUUID();
       const splitEvent = await buildSignedSplitEvent({ claimId: covering.id, owner: state.domainId, firstAmount: raw, firstId, secondId }, state.keypair.secretKey.slice(0, 32), state.keypair.publicKey.toBytes());
-      state.lastEventId = await state.dag.addEvent([state.lastEventId], { type: 'split', ...splitEvent });
+      const payload = { type: 'split', ...splitEvent };
+      const parents = [state.lastEventId];
+      const newId = await state.dag.addEvent(parents, payload);
+      state.lastEventId = newId;
+      await applyIncremental(newId, parents, payload);
       claimIdToSend = firstId;
     } else {
       msgEl.innerHTML = `<div class="msg error">No single source covers this amount.</div>`;
       return;
     }
     const transferEvent = await buildSignedTransferEvent({ claimId: claimIdToSend, from: state.domainId, to }, state.keypair.secretKey.slice(0, 32), state.keypair.publicKey.toBytes());
-    state.lastEventId = await state.dag.addEvent([state.lastEventId], { type: 'transfer', ...transferEvent });
-    await rematerialize();
+    const transferPayload = { type: 'transfer', ...transferEvent };
+    const transferParents = [state.lastEventId];
+    const transferId = await state.dag.addEvent(transferParents, transferPayload);
+    state.lastEventId = transferId;
+    await applyIncremental(transferId, transferParents, transferPayload);
     lastMsg = `<div class="msg ok">Sent ${raw}.</div>`;
   } catch (e) {
     lastMsg = `<div class="msg error">${e.message}</div>`;

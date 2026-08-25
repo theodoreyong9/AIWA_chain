@@ -1,8 +1,9 @@
 import { state, short } from './state.js';
-import { render, rematerialize } from './app.js';
+import { render, applyIncremental } from './app.js';
 import { networkConfigDevnet } from './network.js';
 import { loadSolanaWeb3, broadcastBurnTransaction } from '../core/solana-wallet.js';
 import { hasIdentityCost } from '../core/identity-cost.js';
+import { deriveIdentityCostState } from './identity-cost-view.js';
 import { disconnect } from './identity.js';
 
 let connection = null;
@@ -121,9 +122,20 @@ async function doBurn(root) {
     const timeout = (ms) => new Promise((_, reject) => setTimeout(() => reject(new Error(`Timed out after ${ms / 1000}s`)), ms));
     const signature = await Promise.race([broadcastBurnTransaction(solanaWeb3, conn, realKeypair, lamports), timeout(30000)]);
 
-    state.lastEventId = await state.dag.addEvent([state.lastEventId], { type: 'identity-cost', domain: state.domainId, signature, burnedLamports: lamports, slot: null });
-    state.lastEventId = await state.dag.addEvent([state.lastEventId], { type: 'accrual', domain: state.domainId, b: solAmount });
-    await rematerialize();
+    const identityCostPayload = { type: 'identity-cost', domain: state.domainId, signature, burnedLamports: lamports, slot: null };
+    const identityCostParents = [state.lastEventId];
+    const identityCostId = await state.dag.addEvent(identityCostParents, identityCostPayload);
+    state.lastEventId = identityCostId;
+    await applyIncremental(identityCostId, identityCostParents, identityCostPayload);
+
+    const accrualPayload = { type: 'accrual', domain: state.domainId, b: solAmount };
+    const accrualParents = [state.lastEventId];
+    const accrualId = await state.dag.addEvent(accrualParents, accrualPayload);
+    state.lastEventId = accrualId;
+    await applyIncremental(accrualId, accrualParents, accrualPayload);
+    // identity-cost events carry no VDF proof to verify — cheap to
+    // recompute in full, unlike wallet's own progression history.
+    state.identityCost = deriveIdentityCostState(state.dag);
     setMsg(`<div class="msg ok">Ignited \u2014 signature ${short(signature, 8)}. Real accrual is now running in Continuum.</div>`);
   } catch (e) {
     setMsg(`<div class="msg error">Burn failed: ${e.message}. Check the devnet faucet if your balance is too low.</div>`);

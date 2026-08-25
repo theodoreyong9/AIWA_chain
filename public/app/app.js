@@ -11,6 +11,14 @@ import { renderIgnition } from './ignition.js';
 import { renderMirror } from './mirror-view.js';
 
 const DB_NAME = 'aiwa-chain-local';
+
+// The full, real set of event ids covered by state.wallet's own
+// current materialization — grown incrementally as new events are
+// processed, restored from a snapshot on boot. Never a position or
+// count in any particular topological ordering, which has no
+// guaranteed stability once a local DAG holds more than one domain's
+// events (see state-snapshot.js's own header).
+let coveredEventIds = new Set();
 let eventsSinceSnapshot = 0;
 
 // The real, ongoing VDF computation runs on a dedicated worker thread
@@ -45,26 +53,50 @@ function computeVdfOnWorker(domain, previousOutput, iterations) {
   });
 }
 
+// A full re-fold — real, honest, expensive work, reserved for cases
+// that genuinely need it (an import can bring in events anywhere in
+// causal history, not just at the end). Everyday actions (a claim, a
+// send, a new epoch) use the cheap, real, incremental path instead —
+// see applyIncremental below.
 async function rematerialize() {
   const events = state.dag.topoOrder();
   state.wallet = await materializeWallet(REWARD_PARAMS, events);
+  coveredEventIds = new Set(events.map((e) => e.id));
   const lookup = deriveSourceEpochLookup(events);
   state.mirror = await materializeMirror(events, lookup);
   state.identityCost = deriveIdentityCostState(state.dag);
-  state.causalTick = state.domainId ? await computeCausalTick(state.mirror, state.identityCost, events, state.domainId) : null;
+  await refreshCausalTick();
   notify();
-  maybeSnapshot(events);
+  maybeSnapshot();
+}
+
+// Recomputes only what genuinely depends on "which identity is
+// currently active" — never a reason on its own to redo wallet/mirror/
+// identity-cost materialization, which are the same regardless of
+// which identity happens to be connected right now.
+async function refreshCausalTick() {
+  const events = state.dag.topoOrder();
+  state.causalTick = state.domainId ? await computeCausalTick(state.mirror, state.identityCost, events, state.domainId) : null;
+}
+
+// Applies one real, new event directly to the already-materialized
+// state — the normal path for everyday actions. Never re-verifies
+// anything already covered.
+async function applyIncremental(id, parents, payload) {
+  state.wallet = await applyWalletEvent(REWARD_PARAMS, state.wallet, { id, parents, payload });
+  coveredEventIds.add(id);
+  notify();
+  maybeSnapshot();
 }
 
 // Saves a real snapshot every 25 events — frequent enough that a
 // reload never has much real backlog left to re-verify, infrequent
 // enough not to add real, felt overhead to every single epoch.
-function maybeSnapshot(events) {
+function maybeSnapshot() {
   eventsSinceSnapshot += 1;
   if (eventsSinceSnapshot < 25) return;
   eventsSinceSnapshot = 0;
-  const last = events[events.length - 1];
-  if (last) saveSnapshot(last.id, events.length, state.wallet).catch((err) => console.error('Snapshot save failed:', err));
+  saveSnapshot([...coveredEventIds], state.wallet).catch((err) => console.error('Snapshot save failed:', err));
 }
 
 let progressionLoopRunning = false;
@@ -79,20 +111,14 @@ async function progressionLoop() {
     const lastId = progression?.lastId ?? state.genesisId;
     // The real, heavy computation happens off this thread entirely —
     // the main thread stays free to render and handle input for the
-    // full duration of each epoch, not just during vdf.js's own
-    // internal yields.
+    // full duration of each epoch.
     const vdfOutput = await computeVdfOnWorker(domain, previousOutput, VDF_ITERATIONS);
     if (!state.keypair || state.domainId !== domain) break; // identity changed mid-computation — discard, do not misattribute
     const payload = { type: 'progression', domain, epoch, vdfIterations: VDF_ITERATIONS, vdfOutput };
     const newId = await state.dag.addEvent([lastId], payload);
     state.lastEventId = newId;
     state.lastEpochAt = Date.now();
-    // A real, incremental update — apply just this ONE new event to
-    // the already-materialized wallet state, rather than re-folding
-    // and re-verifying the domain's entire progression history again.
-    state.wallet = await applyWalletEvent(REWARD_PARAMS, state.wallet, { id: newId, parents: [lastId], payload });
-    notify();
-    maybeSnapshot(state.dag.topoOrder());
+    await applyIncremental(newId, [lastId], payload);
   }
   progressionLoopRunning = false;
 }
@@ -132,38 +158,33 @@ async function boot() {
     state.lastEventId = state.genesisId;
     const events = state.dag.topoOrder();
 
-    // A real, verified snapshot — trusted only if its recorded head
-    // event genuinely appears at the exact prefix length it claims,
-    // in THIS real, current topological order. Any mismatch (a
-    // reordering from an import, corruption, anything unexpected)
-    // discards it entirely rather than risking silently-wrong state.
+    // A real, verified snapshot — trusted only for the exact set of
+    // events it says it covers, never a position or count. Any event
+    // not in that set is real, new catch-up work; nothing is skipped.
     const snapshot = await loadSnapshot();
-    let startIndex = 0;
+    let base = initialWalletState();
+    let remaining = events;
     if (snapshot) {
-      const headIndex = events.findIndex((e) => e.id === snapshot.headEventId);
-      if (headIndex !== -1 && headIndex === snapshot.eventCount - 1) {
-        state.wallet = snapshot.wallet;
-        startIndex = headIndex + 1;
-      }
+      base = snapshot.wallet;
+      remaining = events.filter((e) => !snapshot.coveredEventIds.has(e.id));
+      coveredEventIds = new Set(snapshot.coveredEventIds);
     }
 
-    const remaining = events.slice(startIndex);
     if (remaining.length > 0) {
-      showProgress(0, remaining.length, startIndex > 0 ? 'Catching up since last snapshot\u2026' : 'Verifying real, historical progression\u2026');
-      let base = state.wallet ?? initialWalletState();
+      const label = snapshot ? 'Catching up since last snapshot\u2026' : 'Verifying real, historical progression\u2026';
+      showProgress(0, remaining.length, label);
       for (let i = 0; i < remaining.length; i++) {
         base = await applyWalletEvent(REWARD_PARAMS, base, remaining[i]);
-        if (i % 20 === 0) showProgress(i + 1, remaining.length, startIndex > 0 ? 'Catching up since last snapshot\u2026' : 'Verifying real, historical progression\u2026');
+        coveredEventIds.add(remaining[i].id);
+        if (i % 20 === 0) showProgress(i + 1, remaining.length, label);
       }
-      state.wallet = base;
-    } else if (!state.wallet) {
-      state.wallet = initialWalletState();
     }
+    state.wallet = base;
 
     const lookup = deriveSourceEpochLookup(events);
     state.mirror = await materializeMirror(events, lookup);
     state.identityCost = deriveIdentityCostState(state.dag);
-    state.causalTick = state.domainId ? await computeCausalTick(state.mirror, state.identityCost, events, state.domainId) : null;
+    await refreshCausalTick();
     notify();
     render();
   } catch (err) {
@@ -180,4 +201,4 @@ async function boot() {
 
 boot();
 
-export { rematerialize };
+export { rematerialize, applyIncremental, refreshCausalTick };

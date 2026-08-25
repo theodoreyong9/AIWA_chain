@@ -55,7 +55,11 @@ export async function importHistory(dag, file) {
     try { await dag.addEvent(ev.parents, ev.payload); } catch { /* an event whose parent this DAG never received — skipped, not crashed on */ }
   }
   const after = dag.topoOrder().length;
-  return { imported: after - before, alreadyPresent: ordered.length - (after - before), sourceDomain: parsed.fromDomain ?? null };
+  const importedDomains = new Set();
+  for (const ev of ordered) {
+    if (ev.payload?.type === 'progression' && ev.payload?.domain) importedDomains.add(ev.payload.domain);
+  }
+  return { imported: after - before, alreadyPresent: ordered.length - (after - before), sourceDomain: parsed.fromDomain ?? null, importedDomains };
 }
 
 function canonicalReceptionMessage({ domain, epoch, kind, receivedFrom }) {
