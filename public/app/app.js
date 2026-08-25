@@ -50,18 +50,31 @@ export function startProgressionLoop() {
 export function render() {
   const root = document.getElementById('app');
   root.innerHTML = '';
+  root.dataset.rendered = 'true';
   if (state.activeTab === 'ignition') renderIgnition(root);
   else if (state.activeTab === 'mirror') renderMirror(root);
   else renderContinuum(root);
 }
 
 async function boot() {
-  const dag = new EventDag();
-  state.dag = await createPersistedDag(DB_NAME, dag);
-  state.genesisId = await state.dag.addEvent([], { type: 'genesis' });
-  state.lastEventId = state.genesisId;
-  await rematerialize();
-  render();
+  try {
+    const dag = new EventDag();
+    state.dag = await createPersistedDag(DB_NAME, dag);
+    state.genesisId = await state.dag.addEvent([], { type: 'genesis' });
+    state.lastEventId = state.genesisId;
+    await rematerialize();
+    render();
+  } catch (err) {
+    console.error('Boot failed:', err);
+    const root = document.getElementById('app');
+    root.innerHTML = `
+      <div style="padding:40px 20px; text-align:center; font-family:monospace; color:#ede6d9">
+        <div style="font-size:20px; margin-bottom:12px">Something real failed to load.</div>
+        <div style="color:#948a7a; font-size:13px; margin-bottom:16px">${err?.message ?? String(err)}</div>
+        <div style="color:#625a4d; font-size:11px">Check the browser console for the full error \u2014 this message exists so a failure is never silent.</div>
+      </div>
+    `;
+  }
 }
 
 boot();

@@ -8,9 +8,31 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="style.css" />
+<script type="importmap">
+{
+  "imports": {
+    "@noble/curves/ed25519.js": "https://esm.sh/@noble/curves@2.3.0/ed25519.js"
+  }
+}
+</script>
 </head>
 <body>
   <div id="app"></div>
+  <script>
+    window.addEventListener('error', (e) => showBootError(e.error ?? e.message));
+    window.addEventListener('unhandledrejection', (e) => showBootError(e.reason));
+    function showBootError(err) {
+      const root = document.getElementById('app');
+      if (root.dataset.rendered) return; // the real app already rendered something real — don't overwrite it for an unrelated later error
+      root.innerHTML = `
+        <div style="padding:40px 20px; text-align:center; font-family:monospace; color:#ede6d9">
+          <div style="font-size:20px; margin-bottom:12px">Something real failed to load.</div>
+          <div style="color:#948a7a; font-size:13px; margin-bottom:16px; word-break:break-word">${(err && err.message) || String(err)}</div>
+          <div style="color:#625a4d; font-size:11px">Check the browser console for the full error \u2014 this message exists so a failure is never silent.</div>
+        </div>
+      `;
+    }
+  </script>
   <script type="module" src="app/app.js"></script>
 </body>
 </html>
