@@ -1,76 +1,19 @@
-# AIWA Chain
+**AIWA reverses the classical distributed architecture model:** instead of maintaining a global state shared by all identities, each identity carries its own irreversible causal chain. Together, these chains and their authenticated cross-references and **Mirror observations** form the **Causal State Mesh (CSM)**, a distributed causal structure represented as a DAG. An **entropic, Mirror-based causal-time mechanism** combines distributed evidence diversity with relativistic propagation bounds to derive a common **Causal Tick** without requiring a globally synchronized state or clock.
 
-Two wallets, one identity. A Solana keypair activates a real, irreversible burn (Ignition); the same key then accrues native AIWA locally, continuously, based on time elapsed since your last action — never a shared clock, never continuous network access.
+**Identity creation and economic activation are separate.** An AIWA identity or wallet can be created anywhere, including inside a disconnected or newly explored domain. Economic participation begins through an irreversible **commitment associated with an initial domain**, establishing the identity's economic origin without tying it permanently to that location. The identity may subsequently move, operate, or establish economic activity in other domains. Verified causal progression after activation generates **claimable value**, which can later be held and transferred.
 
-Live: https://theodoreyong9.github.io/AIWA_chain/
+**The hardware layer establishes only a minimum independence assumption.** Each autonomous partition requires at least two independently provisioned hardware roots capable of producing authenticated observations. These roots do not calculate the Causal Tick, determine the CSM, measure entropy, or execute the accrual function. Their role is narrower: they prevent a purely software-controlled partition from manufacturing arbitrary claims of physical observer independence simply by generating additional cryptographic identities. Hardware therefore provides a physical basis for independence; the protocol itself derives causality, time, and economic state above that layer.
 
-## What this is
+**AIWA does not attempt to detect or prevent collusion between identities.** Multiple identities may legitimately be controlled by the same actor. The security question is instead whether a colluding group can obtain sufficient **causal evidence authority** to impose an arbitrary interpretation on the network. Identity multiplicity is therefore deliberately separated from evidence diversity: creating more identities does not automatically create more independent causal evidence. Entropic diversity measures the distribution of effective observations, while Mirror consistency and relativistic constraints determine whether those observations can form a valid causal interpretation.
 
-A focused reference implementation of the AIWA protocol (see `docs/YELLOWPAPER.md`): identity, a real sequential-delay progression mechanism, an accrual formula, conservation of transferred value, and a real Mirror/reception layer — composed into two wallets, not a general-purpose platform. No modules, no plugin registry, no pools, no peer-to-peer exchange. That scope was deliberately cut to get this part right first.
+**This provides a combined Sybil and collusion defense.** A Sybil attacker may create additional identities, but each activated identity begins without historical accrual and requires its own irreversible economic commitment and subsequent causal progression. Multiplying identities therefore does not create retroactive value or automatically increase causal authority. A colluding group may coordinate its observations, but if its effective evidence remains below the protocol's tolerated adversarial fraction, it cannot arbitrarily determine the Causal Tick. Security therefore depends not on proving who controls which identities, but on limiting the causal influence that any correlated set of observations can exercise.
 
-130 real tests, no skips, security-relevant cases named as such.
+**The Causal Tick provides the temporal substrate for autonomous value accrual.** Rather than trusting synchronized wall clocks, AIWA derives a deterministic causal coordinate from authenticated observations, causal constraints, and relativistic propagation bounds. Additional valid evidence narrows the admissible causal interval rather than creating a competing global clock. When sufficiently equivalent evidence becomes available, independent observers converge on the same canonical Tick. Accrual is then calculated from verified causal progression since the identity's previous economic event, making economic continuity possible even when communication is intermittent.
 
-## Architecture
+**This changes the role of connectivity.** In conventional distributed systems, loss of connectivity often prevents a shared state from being updated or economically settled. In AIWA, a partition can continue maintaining its local causal histories and economic activity. Connectivity becomes a means of exchanging observations and establishing additional causal relationships rather than a prerequisite for continued operation. When partitions reconnect, their histories are reconciled by adding authenticated causal relationships to the CSM rather than replacing one local state with a globally authoritative state.
 
-```
-public/core/
-  units.js          18-decimal fixed-point amounts, real bigint, never a float balance
-  domain-id.js       identity: SHA-256 of a public key
-  event-dag.js        a content-addressed, causally-linked event set
-  vdf.js               sequential hash chain — bounds rate, not calendar time
-  bigint-math.js        modular exponentiation, Miller-Rabin primality, hash-to-prime
-  wesolowski-vdf.js      a real asymmetric VDF — verification stays cheap regardless
-                        of iteration count, unlike vdf.js's own simple chain
-  progression.js       real epoch advancement, chained to a real VDF proof
-  reward.js            the accrual formula
-  accrual.js            composes progression + reward into a real position per domain;
-                        t resets on every burn or claim, A never resets
-  conservation.js       transfer and split of already-claimed value, real bigint
-  identity-cost.js      Genesis Commitment — a real Solana burn, churn-resistance curve
-  solana-wallet.js       key generation, encryption, real burn transaction
-  weighted-median.js      real, adversarially-robust estimator — a minority of weight
-                        cannot pull the result, as long as it stays below half
-  causal-tick.js          a domain's externally-corroborated position, weighted by
-                        real Genesis Commitment burns — real and tested, not yet
-                        surfaced in the reference UI
-  wallet.js               composes accrual + conservation coherently, by construction —
-                          a claim can never debit one side without the other
+**This enables a different class of autonomous systems.** Sensors, robots, vehicles, industrial machines, edge nodes, remote infrastructure, and other devices can maintain persistent economic state while operating outside continuous cloud connectivity. They can accrue value from verified causal participation, retain that economic history through communication outages, and later reconcile their histories when observations become available. This creates an **offline economic layer** for infrastructure that today generally requires either continuous connectivity, centralized settlement, pre-funded local operation, or delayed manual reconciliation.
 
-public/app/
-  the reference UI — Continuum (AIWA wallet, a real trajectory of your
-  own causal history), Mirror (real reconciliation — export/import a
-  real history file, commit a real, signed reception of what you
-  actually now know, an entropic-space view of what you've observed),
-  and Ignition (Solana wallet)
-```
+**At interplanetary scale, the same model applies across physical domains separated by propagation delays.** An identity can be created directly on Mars, activated there, and accrue value without first interacting with Earth. Conversely, an identity activated on Earth can subsequently operate in another domain while retaining its causal and economic history. Local domains can continue operating during communication delays or complete communication blackouts, while later observations establish which causal relationships between their histories are physically and cryptographically valid.
 
-## t vs A, precisely
-
-`t` is time since this domain's own last economic action (a burn or a claim) — resets every time. `A` is this domain's own total progression age — never resets. Both are derived from the domain's own real, VDF-verified progression state; neither can be supplied directly by an event payload. An earlier version of this let the caller declare its own reference epoch — a real, closed gap, not a hypothetical one.
-
-## Running locally
-
-```
-npm install
-npm test
-```
-
-Open `public/index.html` through a real local server (module imports need `http://`, not `file://`) — e.g. `npx serve public`.
-
-## Deployment
-
-Automatic on push to `main` — `.github/workflows/deploy.yml` runs the real test suite first, deploys `public/` to GitHub Pages only if it passes. `.github/workflows/ci.yml` runs the same suite on every other branch and pull request.
-
-## Honest, stated limits
-
-- The reward formula's fractional exponents require floating-point computation internally — `fromFloat()` (`units.js`) converts the result to a real, exact bigint at that boundary, faithful to what the float actually holds, never fabricating precision it doesn't have.
-- Devnet only. `identity-cost.js`'s own churn-resistance cost curve is real but optional, off by default.
-- No real peer-to-peer transport in this scope — Mirror/reception is real and tested, but only ever fed by this same local domain's own events. A second, independent domain reconciling with this one is a real, separate piece of work, not attempted here.
-- The VDF (`vdf.js`) is a real sequential hash chain, not an asymmetric cryptographic VDF (Wesolowski, Pietrzak) — verifying costs what producing costs. It bounds the rate of production; it makes no claim about calendar time, and none is made in `docs/YELLOWPAPER.md`.
-- Nothing here has been run in a real browser by the person building it. IndexedDB persistence, the burn transaction, and the rendered UI are real code, reviewed carefully, syntax-checked — not the same claim as verified working end to end. Test it yourself before trusting it with real value.
-- `wesolowski-vdf.js`'s own RSA-2048 modulus was transcribed from a single web source during development, never independently cross-verified against a second, fully authoritative source. Verify it yourself before real use — see that file's own header.
-- `causal-tick.js` is real, tested, and now wired into the reference UI (Continuum shows it) and `app.js`'s own rematerialization — but it remains a real, additional corroboration layer, never a substitute for a domain's own VDF-bound progression, which stays the only unconditional protection (see the Yellow Paper's own §13).
-
-## License
-
-Not yet decided.
+**AIWA therefore replaces the assumption of an always-synchronized economy with a system of persistent autonomous causal agents:** identities maintain local irreversible histories; the CSM records their relationships; Mirrors provide authenticated observations; entropic diversity limits the authority of concentrated evidence; relativistic bounds constrain physically possible causal relationships; the Causal Tick provides a common causal-time substrate; and the accrual mechanism converts verified causal progression into transferable value. The result is an architecture designed not to synchronize an interplanetary network continuously, but to allow such a network to remain economically meaningful precisely because continuous synchronization is impossible.
