@@ -3,6 +3,7 @@ import { render, rematerialize } from './app.js';
 import { networkConfigDevnet } from './network.js';
 import { loadSolanaWeb3, broadcastBurnTransaction } from '../core/solana-wallet.js';
 import { hasIdentityCost } from '../core/identity-cost.js';
+import { disconnect } from './identity.js';
 
 let connection = null;
 let solBalanceLamports = null;
@@ -47,7 +48,10 @@ export function renderIgnition(root) {
   root.innerHTML = `
     <div class="top-bar">
       <div class="wordmark">AIWA <em>chain</em></div>
-      <div class="address-chip" id="addr-copy" title="Click to copy">${short(state.keypair.publicKey.toBase58(), 10)}</div>
+      <div style="display:flex; align-items:center; gap:8px">
+        <div class="address-chip" id="addr-copy" title="Click to copy">${short(state.keypair.publicKey.toBase58(), 10)}</div>
+        <button class="ghost" id="disconnect-btn" style="padding:5px 10px; font-size:11px">Disconnect</button>
+      </div>
     </div>
     <div class="tabs">
       <div class="tab" data-tab="continuum">Continuum</div>
@@ -78,6 +82,11 @@ export function renderIgnition(root) {
 
   root.querySelectorAll('.tab').forEach((el) => el.addEventListener('click', () => { state.activeTab = el.dataset.tab; render(); }));
   root.querySelector('#addr-copy').addEventListener('click', () => navigator.clipboard?.writeText(state.keypair.publicKey.toBase58()));
+  root.querySelector('#disconnect-btn').addEventListener('click', () => {
+    if (!confirm('Disconnect from this identity? Your real history stays saved on this device (IndexedDB) and can be restored with your secret key \u2014 this only stops acting as it right now.')) return;
+    disconnect();
+    render();
+  });
   root.querySelector('#refresh-btn').addEventListener('click', refreshBalance);
   root.querySelector('#burn-btn').addEventListener('click', () => doBurn(root));
 }
