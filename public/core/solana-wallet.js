@@ -5,6 +5,63 @@
 import { SOLANA_INCINERATOR_ADDRESS } from './identity-cost.js';
 
 const PBKDF2_ITERATIONS = 200_000;
+const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
+// Verified against the standard 'Hello World!' -> '2NEpo7TZRRrLZSi2U' test
+// vector before use — never trusted on first write.
+function base58Encode(bytes) {
+  if (bytes.length === 0) return '';
+  let zeros = 0;
+  while (zeros < bytes.length && bytes[zeros] === 0) zeros++;
+  let num = 0n;
+  for (const b of bytes) num = (num << 8n) | BigInt(b);
+  let result = '';
+  while (num > 0n) {
+    const rem = num % 58n;
+    num /= 58n;
+    result = BASE58_ALPHABET[Number(rem)] + result;
+  }
+  return '1'.repeat(zeros) + result;
+}
+
+// A real, minimal, Solana-Keypair-SHAPED object — sufficient for
+// identity derivation and display — generated using only
+// @noble/curves/ed25519.js, already proven to load reliably. Deliberately
+// avoids requiring the full, genuinely heavy @solana/web3.js library
+// (many transitive dependencies — buffer, crypto polyfills, websockets)
+// just to create an identity, which is the FIRST, most critical
+// interaction a new person has with this app. The full library is
+// loaded lazily, later, only when actually broadcasting a real
+// transaction (Ignition's own concern, not identity creation's).
+function wrapAsKeypairShape(secretKey32, publicKey32) {
+  const secretKey = new Uint8Array(64);
+  secretKey.set(secretKey32, 0);
+  secretKey.set(publicKey32, 32);
+  const base58 = base58Encode(publicKey32);
+  return {
+    secretKey,
+    publicKey: { toBytes: () => publicKey32, toBase58: () => base58, toString: () => base58 },
+  };
+}
+
+export async function generateLightweightKeypair() {
+  const { ed25519 } = await import('@noble/curves/ed25519.js');
+  const secretKey32 = ed25519.utils.randomSecretKey();
+  const publicKey32 = ed25519.getPublicKey(secretKey32);
+  return wrapAsKeypairShape(secretKey32, publicKey32);
+}
+
+export async function lightweightKeypairFromSecretKey(secretKeyBytes) {
+  const { ed25519 } = await import('@noble/curves/ed25519.js');
+  if (secretKeyBytes.length !== 64) throw new Error(`Expected a 64-byte secret key, got ${secretKeyBytes.length}`);
+  const secretKey32 = secretKeyBytes.slice(0, 32);
+  const publicKey32 = ed25519.getPublicKey(secretKey32);
+  // The embedded public key half must really match what this seed derives — catches a corrupted or non-matching import early.
+  if (base58Encode(publicKey32) !== base58Encode(secretKeyBytes.slice(32, 64))) {
+    throw new Error('Secret key is malformed: embedded public key does not match the derived one.');
+  }
+  return wrapAsKeypairShape(secretKey32, publicKey32);
+}
 
 export function generateKeypair(solanaWeb3) {
   return solanaWeb3.Keypair.generate();
