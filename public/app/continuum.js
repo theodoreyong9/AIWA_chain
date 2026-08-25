@@ -1,6 +1,6 @@
 import { state, short, REWARD_PARAMS } from './state.js';
 import { render, rematerialize } from './app.js';
-import { activateWithNewKeypair, activateWithSecretKeyBytes, hasSavedKey, saveCurrentKey, unlockSavedKey, clearSavedKey } from './identity.js';
+import { activateWithNewKeypair, activateWithSecretKeyBytes, hasSavedKey, saveCurrentKey, unlockSavedKey, clearSavedKey, disconnect } from './identity.js';
 import { claimableNow } from '../core/accrual.js';
 import { spendableClaims, totalBalance, buildSignedTransferEvent, buildSignedSplitEvent } from '../core/wallet.js';
 import { format as formatAiwaAmount, toUnits, fromUnits } from '../core/units.js';
@@ -124,7 +124,10 @@ function activeContinuum(root) {
   root.innerHTML = `
     <div class="top-bar">
       <div class="wordmark">AIWA <em>chain</em></div>
-      <div class="address-chip" id="addr-copy" title="Click to copy">${short(state.domainId, 10)}</div>
+      <div style="display:flex; align-items:center; gap:8px">
+        <div class="address-chip" id="addr-copy" title="Click to copy">${short(state.domainId, 10)}</div>
+        <button class="ghost" id="disconnect-btn" style="padding:5px 10px; font-size:11px">Disconnect</button>
+      </div>
     </div>
     <div class="tabs">
       <div class="tab active" data-tab="continuum">Continuum</div>
@@ -203,6 +206,11 @@ function activeContinuum(root) {
 
   root.querySelectorAll('.tab').forEach((el) => el.addEventListener('click', () => { state.activeTab = el.dataset.tab; render(); }));
   root.querySelector('#addr-copy').addEventListener('click', () => navigator.clipboard?.writeText(state.domainId));
+  root.querySelector('#disconnect-btn').addEventListener('click', () => {
+    if (!confirm('Disconnect from this identity? Your real history stays saved on this device (IndexedDB) and can be restored with your secret key \u2014 this only stops acting as it right now.')) return;
+    disconnect();
+    render();
+  });
 
   const claimBtn = root.querySelector('#claim-btn');
   if (claimBtn) claimBtn.addEventListener('click', async () => {
