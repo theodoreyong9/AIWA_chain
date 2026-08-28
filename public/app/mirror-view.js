@@ -15,6 +15,16 @@ let p2pOfferBlob = null;
 let p2pAnswerBlob = null;
 let p2pSyncedCount = 0;
 let p2pMsg = null;
+let pendingIncomingOffer = null; // a real offer blob arrived via a scanned QR's own URL, ready to pre-fill
+
+// Called once, right after boot, if a real offer blob arrived via a
+// scanned QR code's own URL — switches to Mirror and pre-fills the
+// accept field, so scanning is the only real step needed before
+// clicking Accept.
+export function applyIncomingOfferFromHash(blob) {
+  pendingIncomingOffer = blob;
+  state.activeTab = 'mirror';
+}
 
 // Real domains this identity has actually, verifiably committed to
 // having observed — read from state.mirror's own real reception
@@ -95,6 +105,26 @@ function entropicSpaceSvg(domains) {
   `;
 }
 
+// A real QR code encoding a real URL, so scanning it with a phone's
+// own camera app opens this site directly with the offer/answer
+// pre-filled — no manual copy-paste needed on the scanning side. QR
+// codes have a real, hard data-capacity limit (~2900 characters at
+// low error correction); a real WebRTC offer with many real ICE
+// candidates can exceed that, so this returns null (never throws)
+// above a safe threshold, and callers fall back to the always-real
+// text copy/paste, which has no such limit.
+let qrModule = null;
+async function generateQrSvg(kind, blob) {
+  const url = `${location.origin}${location.pathname}#p2p-${kind}=${encodeURIComponent(blob)}`;
+  if (url.length > 2400) return null;
+  try {
+    if (!qrModule) qrModule = await import('qrcode');
+    return await qrModule.default.toString(url, { type: 'svg', errorCorrectionLevel: 'L', margin: 1 });
+  } catch {
+    return null; // a real, unexpected QR failure — never fatal, text fallback remains
+  }
+}
+
 function p2pStatusHtml() {
   if (p2pStatus === 'open') {
     return `
@@ -105,18 +135,20 @@ function p2pStatusHtml() {
   }
   if (p2pStatus === 'awaiting-answer') {
     return `
-      <p class="hint">Send this text to the other person (chat, email, however). Once they answer your call, paste what they send back below.</p>
+      <p class="hint">On another device: scan this to open the connection directly \u2014 or send the text below by hand.</p>
+      <div id="p2p-offer-qr" style="text-align:center; margin:10px 0"></div>
       <textarea id="p2p-offer-display" readonly style="min-height:70px; font-size:10px">${p2pOfferBlob}</textarea>
       <div class="btn-row"><button id="p2p-copy-offer">Copy</button></div>
       <label class="field-label" style="margin-top:14px">Their answer</label>
-      <textarea id="p2p-answer-input" placeholder="paste what they send back here" style="min-height:70px; font-size:10px"></textarea>
+      <textarea id="p2p-answer-input" placeholder="paste what they send back here, or it'll fill in automatically if they scan your QR and send theirs back the same way" style="min-height:70px; font-size:10px"></textarea>
       <div class="btn-row"><button class="primary" id="p2p-complete-btn">Complete connection</button><button class="ghost" id="p2p-cancel-btn">Cancel</button></div>
       <div id="p2p-msg">${p2pMsg ?? ''}</div>
     `;
   }
   if (p2pStatus === 'awaiting-completion') {
     return `
-      <p class="hint">Send this text back to whoever's call you just answered. The connection completes automatically on their side once they paste it in.</p>
+      <p class="hint">Scan this on their device, or send the text below by hand \u2014 either way, the connection completes automatically once it reaches them.</p>
+      <div id="p2p-answer-qr" style="text-align:center; margin:10px 0"></div>
       <textarea id="p2p-answer-display" readonly style="min-height:70px; font-size:10px">${p2pAnswerBlob}</textarea>
       <div class="btn-row"><button id="p2p-copy-answer">Copy</button><button class="ghost" id="p2p-cancel-btn">Cancel</button></div>
     `;
@@ -125,7 +157,8 @@ function p2pStatusHtml() {
     <p class="hint">Exactly like a phone call: one of you calls, the other answers \u2014 doesn't matter who. Calling: click Start, send the resulting text to the other person, then paste back the answer they send you. Answering: paste the text they sent you below, click Accept, then send back the answer this produces.</p>
     <div class="btn-row"><button class="primary" id="p2p-start-btn">Start a connection (call)</button></div>
     <label class="field-label" style="margin-top:14px">Or answer someone else's call</label>
-    <textarea id="p2p-offer-input" placeholder="paste the text they sent you here" style="min-height:70px; font-size:10px"></textarea>
+    ${pendingIncomingOffer ? '<p class="hint" style="color:var(--moss)">A real offer arrived from a scanned QR \u2014 already filled in below. Just click Accept.</p>' : ''}
+    <textarea id="p2p-offer-input" placeholder="paste the text they sent you here" style="min-height:70px; font-size:10px">${pendingIncomingOffer ?? ''}</textarea>
     <div class="btn-row"><button id="p2p-accept-btn">Accept</button></div>
     <div id="p2p-msg">${p2pMsg ?? ''}</div>
   `;
@@ -164,6 +197,9 @@ export function renderMirror(root) {
 
   const verifiedDomains = verifiedObservedDomains();
   const pendingDomains = pendingImportDomains();
+  const myEpoch = state.wallet.accrual.progression.domains[state.domainId]?.epoch ?? 0;
+  const corroboratedEpoch = state.causalTick?.tick ?? 0;
+  const unobservedEpochs = Math.max(0, myEpoch - corroboratedEpoch);
 
   root.innerHTML = `
     <div class="top-bar">
@@ -177,6 +213,16 @@ export function renderMirror(root) {
       <div class="tab" data-tab="continuum">Continuum</div>
       <div class="tab active" data-tab="mirror">Mirror</div>
       <div class="tab" data-tab="ignition">Ignition</div>
+    </div>
+
+    <div class="card" style="border-color:${unobservedEpochs > 0 ? 'var(--amber-dim)' : 'var(--border)'}">
+      <div class="card-title">Real, current visibility</div>
+      ${unobservedEpochs > 0
+        ? `<p class="hint">${myEpoch} real epochs computed, but only ${corroboratedEpoch} corroborated by anyone else \u2014 <strong style="color:var(--amber)">${unobservedEpochs} epoch${unobservedEpochs === 1 ? '' : 's'} nobody has seen yet</strong>. Still fully real and yours; just not witnessed. Connect below to change that.</p>`
+        : myEpoch > 0
+          ? `<p class="hint" style="color:var(--moss)">All ${myEpoch} of your real epochs are corroborated by at least one other domain.</p>`
+          : `<p class="hint">No real progression yet \u2014 nothing to observe.</p>`
+      }
     </div>
 
     <div class="card">
@@ -193,7 +239,7 @@ export function renderMirror(root) {
 
     <div class="card">
       <div class="card-title">Live connection</div>
-      <p class="hint">A real, direct WebRTC connection \u2014 no server in between, nowhere for one to run on a static site. Bootstrapping still needs one real blob of text moved by hand between two people \u2014 once that's done, every event from either side syncs live from there on, no more manual exports needed.</p>
+      <p class="hint">The channel is temporary; what moves through it isn't. Anything received here is verified and saved locally, for good \u2014 closing this tab never erases it. What ends when a tab closes is only this specific live link, exactly like a real interplanetary link goes quiet during a real blackout: reconnecting later means re-establishing contact, never losing what each side already knew before. There's no directory or discovery yet \u2014 for now, joining the wider mesh means someone already on it invites you in, and if they're simultaneously connected to others, you get their real-time updates too, transitively, for as long as all three stay connected.</p>
       ${p2pStatusHtml()}
     </div>
 
@@ -244,6 +290,7 @@ export function renderMirror(root) {
     const msgEl = root.querySelector('#p2p-msg');
     const offerBlob = root.querySelector('#p2p-offer-input').value.trim();
     if (!offerBlob) { msgEl.innerHTML = `<div class="msg error">Paste a real offer first.</div>`; return; }
+    pendingIncomingOffer = null;
     try {
       const conn = startP2PConnection();
       p2pAnswerBlob = await conn.acceptOfferAndCreateAnswer(offerBlob);
@@ -304,6 +351,15 @@ export function renderMirror(root) {
   root.querySelectorAll('[data-commit]').forEach((btn) => {
     btn.addEventListener('click', () => doCommitReception(root, btn.dataset.commit, pendingDomains.get(btn.dataset.commit)));
   });
+
+  // Real QR injection happens after the synchronous render, since
+  // generating one is async — never blocks the rest of the page from
+  // appearing. A real, unexpected failure just leaves the container
+  // empty; the always-real text blob right below it still works.
+  const offerQrEl = root.querySelector('#p2p-offer-qr');
+  if (offerQrEl) generateQrSvg('offer', p2pOfferBlob).then((svg) => { if (svg && root.isConnected) offerQrEl.innerHTML = svg; });
+  const answerQrEl = root.querySelector('#p2p-answer-qr');
+  if (answerQrEl) generateQrSvg('answer', p2pAnswerBlob).then((svg) => { if (svg && root.isConnected) answerQrEl.innerHTML = svg; });
 }
 
 async function doCommitReception(root, sourceDomain, info) {

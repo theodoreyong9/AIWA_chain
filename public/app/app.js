@@ -8,7 +8,7 @@ import { saveSnapshot, loadSnapshot } from './state-snapshot.js';
 import { state, REWARD_PARAMS, VDF_ITERATIONS, notify } from './state.js';
 import { renderContinuum } from './continuum.js';
 import { renderIgnition } from './ignition.js';
-import { renderMirror } from './mirror-view.js';
+import { renderMirror, applyIncomingOfferFromHash } from './mirror-view.js';
 
 const DB_NAME = 'aiwa-chain-local';
 
@@ -197,6 +197,16 @@ async function boot() {
         coveredEventIds.add(remaining[i].id);
         if (i % 20 === 0) showProgress(i + 1, remaining.length, label);
       }
+      // A real, unconditional save right here — the 5-second interval
+      // gate exists to avoid excessive writes during the ONGOING
+      // per-epoch loop, but boot's own catch-up happens once per page
+      // load, not per-epoch. Without this, a real in-memory-only
+      // lastSnapshotAt resets on every reload, so reloading more often
+      // than the interval means no new snapshot is ever saved between
+      // reloads — a real, closed gap, not a hypothetical one: exactly
+      // what let a real backlog grow across many real test sessions.
+      await saveSnapshot([...coveredEventIds], base).catch((err) => console.error('Post-catch-up snapshot save failed:', err));
+      lastSnapshotAt = Date.now();
     }
     state.wallet = base;
 
@@ -205,6 +215,16 @@ async function boot() {
     state.identityCost = deriveIdentityCostState(state.dag);
     await refreshCausalTick();
     notify();
+
+    // A real offer arrived via a scanned QR's own URL — pre-fill the
+    // accept flow rather than leaving the person to notice and paste
+    // it manually. Only ever real, own-app URLs are read here.
+    const hashMatch = location.hash.match(/^#p2p-offer=(.+)$/);
+    if (hashMatch) {
+      history.replaceState(null, '', location.pathname); // real, one-time use — never re-triggers on a later reload
+      applyIncomingOfferFromHash(decodeURIComponent(hashMatch[1]));
+    }
+
     render();
   } catch (err) {
     console.error('Boot failed:', err);

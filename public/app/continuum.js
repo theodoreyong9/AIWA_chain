@@ -22,6 +22,9 @@ let lastMsg = null;
 function noIdentity(root) {
   root.innerHTML = `
     <div class="top-bar"><div style="display:flex; align-items:center; gap:10px"><div class="wordmark">AIWA <em>chain</em></div><a href="https://github.com/theodoreyong9/AIWA_chain" target="_blank" rel="noopener" class="gh-link" title="View source on GitHub">GitHub</a><a href="YELLOWPAPER.pdf" target="_blank" class="gh-link" title="Read the Yellow Paper (PDF)">Yellow Paper</a></div></div>
+    <div class="card" style="background:transparent; border-style:dashed">
+      <p class="hint" style="text-align:center">First time here? Create a new identity below \u2014 takes a second, nothing to remember yet.<br/>Coming back after losing a device? Skip straight to whichever real passphrase, seed phrase, or saved key you used before \u2014 it picks up exactly where you left off, never from zero.</p>
+    </div>
     <div class="card">
       <div class="empty-state">
         <div class="glyph">\u25CB</div>
@@ -39,7 +42,7 @@ function noIdentity(root) {
     </div>` : ''}
     <div class="card">
       <div class="card-title">Open with a passphrase</div>
-      <p class="hint">The same real identity, anywhere \u2014 the identical passphrase always derives the identical keypair, on any device, with nothing else to carry. <strong style="color:var(--amber)">Requires at least 6 real, unrelated words.</strong> This app's own salt is fixed and public (visible in the source), so a short or guessable passphrase can be brute-forced by anyone \u2014 there is no random salt protecting you here, unlike a normal password. <strong style="color:var(--amber)">This is not BIP39</strong> \u2014 it uses a real derivation specific to this app, not the standard real Solana wallets use. If you have an existing Solana wallet's real seed phrase, use "Import a real Solana wallet" below instead \u2014 typing it here opens a real, but different and unrelated, identity.</p>
+      <p class="hint">The same real identity, anywhere \u2014 the identical passphrase always derives the identical keypair, on any device, with nothing else to carry. The identity this creates is real and fully functional \u2014 you can send and receive real SOL with it, same as any wallet. <strong style="color:var(--amber)">Requires at least 6 real, unrelated words.</strong> This app's own salt is fixed and public (visible in the source), so a short or guessable passphrase can be brute-forced by anyone \u2014 there is no random salt protecting you here, unlike a normal password. <strong style="color:var(--amber)">This is not BIP39</strong> \u2014 meaning only this: if you already have an existing Solana wallet (Phantom, Solflare) with real funds, typing its seed phrase here will NOT give you access to those funds, since the derivation differs. Use "Import a real Solana wallet" below for that instead.</p>
       <div style="display:flex; gap:6px">
         <input type="password" id="passphrase-input" placeholder="at least 6 real, unrelated words" style="flex:1" />
         <button type="button" class="ghost" id="passphrase-toggle" style="padding:0 12px">Show</button>
@@ -177,11 +180,14 @@ function activeContinuum(root) {
     </div>
 
     <div class="hero">
-      <div class="hero-balance ${recentTick ? 'pulse' : ''}">${formatHeroBalance(total)}</div>
+      <div class="hero-balance ${recentTick ? 'pulse' : ''}">${formatHeroBalance(spendable)}</div>
       <div class="hero-unit">AIWA</div>
       <div class="status-line">
         <span class="status-dot ${recentTick ? 'continuous' : 'partitioned'}"></span>
         ${recentTick ? 'continuous' : 'idle \u2014 no recent progression'}
+      </div>
+      <div style="margin-top:10px; font-family:var(--font-mono); font-size:11px; color:var(--text-faint)">
+        epoch <span class="${recentTick ? 'pulse' : ''}" style="color:var(--text-dim); font-variant-numeric:tabular-nums">${selfReportedEpoch}</span> \u2014 real, sequential, computing right now on this device
       </div>
       <p class="hint" style="margin-top:14px; max-width:340px; margin-left:auto; margin-right:auto">Your own progression needs no connection at all, ever \u2014 it runs anywhere, forever, alone if it has to. Reconciling with another domain needs only some way to move real bytes between you \u2014 never Earth's own network specifically, never any one particular service. Anywhere a real message could physically arrive is enough.</p>
     </div>
@@ -190,8 +196,7 @@ function activeContinuum(root) {
       <div class="card-title">Position</div>
       <div class="row"><span class="row-label">Committed capital</span><span class="row-value">${position ? position.b : 0} SOL</span></div>
       <div class="row"><span class="row-label">Claimable now</span><span class="row-value">${formatAiwaAmount(claimable)} AIWA</span></div>
-      <div class="row"><span class="row-label">Already in wallet</span><span class="row-value">${formatAiwaAmount(spendable)} AIWA</span></div>
-      <p class="hint">Claimable + already in wallet = the total above.</p>
+      <p class="hint">The balance above is only what's already yours. Claimable now is real, growing value not yet moved into it \u2014 press Claim to add it.</p>
       <div class="btn-row">
         <button class="primary" id="claim-btn" ${claimable <= 0n ? 'disabled' : ''}>Claim</button>
       </div>
