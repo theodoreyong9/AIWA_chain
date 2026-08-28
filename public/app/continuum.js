@@ -4,6 +4,16 @@ import { activateWithNewKeypair, activateWithSecretKeyBytes, activateWithPassphr
 import { claimableNow } from '../core/accrual.js';
 import { spendableClaims, totalBalance, buildSignedTransferEvent, buildSignedSplitEvent } from '../core/wallet.js';
 import { format as formatAiwaAmount, toUnits, fromUnits } from '../core/units.js';
+
+// A real, fixed-decimal display for the main balance — formatAiwaAmount's
+// own trailing-zero trimming is right for compact rows elsewhere, but
+// looks visually inconsistent next to Ignition's own always-six-decimal
+// SOL display when a balance happens to be a round number.
+function formatHeroBalance(units) {
+  const full = fromUnits(units);
+  const [whole, frac = ''] = full.split('.');
+  return `${whole}.${frac.padEnd(6, '0').slice(0, 6)}`;
+}
 import { checkCausalConsistency } from '../core/causal-tick.js';
 import { computeResidualDiversity } from '../core/mirror.js';
 
@@ -11,7 +21,7 @@ let lastMsg = null;
 
 function noIdentity(root) {
   root.innerHTML = `
-    <div class="top-bar"><div class="wordmark">AIWA <em>chain</em></div></div>
+    <div class="top-bar"><div style="display:flex; align-items:center; gap:10px"><div class="wordmark">AIWA <em>chain</em></div><a href="https://github.com/theodoreyong9/AIWA_chain" target="_blank" rel="noopener" class="gh-link" title="View source on GitHub">GitHub</a><a href="YELLOWPAPER.pdf" target="_blank" class="gh-link" title="Read the Yellow Paper (PDF)">Yellow Paper</a></div></div>
     <div class="card">
       <div class="empty-state">
         <div class="glyph">\u25CB</div>
@@ -29,9 +39,9 @@ function noIdentity(root) {
     </div>` : ''}
     <div class="card">
       <div class="card-title">Open with a passphrase</div>
-      <p class="hint">The same real identity, anywhere \u2014 the identical passphrase always derives the identical keypair, on any device, with nothing else to carry. A weak passphrase is exactly as unsafe as a weak private key. <strong style="color:var(--amber)">This is not BIP39</strong> \u2014 it uses a real derivation specific to this app, not the standard real Solana wallets use. If you have an existing Solana wallet's real seed phrase, use "Import a real Solana wallet" below instead \u2014 typing it here opens a real, but different and unrelated, identity.</p>
+      <p class="hint">The same real identity, anywhere \u2014 the identical passphrase always derives the identical keypair, on any device, with nothing else to carry. <strong style="color:var(--amber)">Requires at least 6 real, unrelated words.</strong> This app's own salt is fixed and public (visible in the source), so a short or guessable passphrase can be brute-forced by anyone \u2014 there is no random salt protecting you here, unlike a normal password. <strong style="color:var(--amber)">This is not BIP39</strong> \u2014 it uses a real derivation specific to this app, not the standard real Solana wallets use. If you have an existing Solana wallet's real seed phrase, use "Import a real Solana wallet" below instead \u2014 typing it here opens a real, but different and unrelated, identity.</p>
       <div style="display:flex; gap:6px">
-        <input type="password" id="passphrase-input" placeholder="a real passphrase, the more words the better" style="flex:1" />
+        <input type="password" id="passphrase-input" placeholder="at least 6 real, unrelated words" style="flex:1" />
         <button type="button" class="ghost" id="passphrase-toggle" style="padding:0 12px">Show</button>
       </div>
       <div class="btn-row"><button class="primary" id="passphrase-btn">Open</button></div>
@@ -84,6 +94,11 @@ function noIdentity(root) {
     const msgEl = root.querySelector('#passphrase-msg');
     const passphrase = root.querySelector('#passphrase-input').value;
     if (!passphrase) { msgEl.innerHTML = `<div class="msg error">Enter a passphrase.</div>`; return; }
+    const wordCount = passphrase.trim().split(/\s+/).filter(Boolean).length;
+    if (wordCount < 6) {
+      msgEl.innerHTML = `<div class="msg error">Too weak \u2014 use at least 6 real, unrelated words. The salt this app uses is fixed and public, so a short or common passphrase can be brute-forced by anyone.</div>`;
+      return;
+    }
     try { await activateWithPassphrase(passphrase); render(); }
     catch (e) { msgEl.innerHTML = `<div class="msg error">${e.message}</div>`; }
   });
@@ -113,46 +128,27 @@ function noIdentity(root) {
   });
 }
 
-function trajectorySvg() {
+function activityLog() {
   const events = state.dag.topoOrder().filter((e) => e.payload?.domain === state.domainId || e.payload?.type === 'genesis');
-  const relevant = events.filter((e) => ['genesis', 'identity-cost', 'accrual', 'claim', 'transfer', 'split'].includes(e.payload?.type)).slice(-10);
-  if (relevant.length === 0) return `<div class="timeline-empty">Nothing yet \u2014 your trajectory starts with your first action.</div>`;
+  const relevant = events.filter((e) => ['genesis', 'identity-cost', 'accrual', 'claim', 'transfer', 'split'].includes(e.payload?.type)).slice(-10).reverse();
+  if (relevant.length === 0) return `<div class="timeline-empty">Nothing yet \u2014 your activity starts with your first action.</div>`;
 
-  const width = Math.max(280, relevant.length * 70);
-  const height = 120;
-  const midY = height / 2;
-  const step = relevant.length > 1 ? (width - 60) / (relevant.length - 1) : 0;
-
-  const styleFor = (p) => {
-    if (p.type === 'genesis') return { color: 'var(--text-faint)', r: 4, label: 'genesis' };
-    if (p.type === 'identity-cost') return { color: 'var(--amber)', r: 7, label: 'ignited' };
-    if (p.type === 'accrual') return { color: 'var(--amber-dim)', r: 5, label: `committed ${p.b}` };
-    if (p.type === 'claim') return { color: 'var(--moss)', r: 7, label: `claimed ${p.amount}` };
+  const describe = (p) => {
+    if (p.type === 'genesis') return { label: 'Genesis', detail: 'Local history started' };
+    if (p.type === 'identity-cost') return { label: 'Ignited', detail: `${short(p.signature, 8)}` };
+    if (p.type === 'accrual') return { label: 'Committed', detail: `${p.b} SOL` };
+    if (p.type === 'claim') return { label: 'Claimed', detail: `${p.amount} AIWA` };
     if (p.type === 'transfer') return p.from === state.domainId
-      ? { color: 'var(--slate)', r: 6, label: `sent \u2192 ${short(p.to, 5)}` }
-      : { color: 'var(--moss)', r: 6, label: `received \u2190 ${short(p.from, 5)}` };
-    if (p.type === 'split') return { color: 'var(--amber-dim)', r: 5, label: 'split' };
-    return { color: 'var(--text-dim)', r: 4, label: p.type };
+      ? { label: 'Sent', detail: `\u2192 ${short(p.to, 10)}` }
+      : { label: 'Received', detail: `\u2190 ${short(p.from, 10)}` };
+    if (p.type === 'split') return { label: 'Split', detail: 'a claim into two' };
+    return { label: p.type, detail: '' };
   };
 
-  const points = relevant.map((e, i) => {
-    const x = 30 + i * step;
-    const wobble = (i % 3 === 1) ? -14 : (i % 3 === 2) ? 14 : 0;
-    const y = midY + wobble;
-    return { x, y, style: styleFor(e.payload) };
-  });
-
-  const pathD = points.map((p, i) => (i === 0 ? `M ${p.x} ${p.y}` : `L ${p.x} ${p.y}`)).join(' ');
-
-  return `
-    <div style="overflow-x:auto">
-      <svg viewBox="0 0 ${width} ${height}" style="min-width:${width}px; height:${height}px; display:block">
-        <path d="${pathD}" fill="none" stroke="var(--border)" stroke-width="1.5" />
-        ${points.map((p) => `<circle cx="${p.x}" cy="${p.y}" r="${p.style.r}" fill="${p.style.color}" />`).join('')}
-        ${points.map((p) => `<text x="${p.x}" y="${p.y + p.style.r + 16}" text-anchor="middle" font-size="9" fill="var(--text-dim)" font-family="var(--font-mono)">${p.style.label}</text>`).join('')}
-      </svg>
-    </div>
-  `;
+  return relevant.map((e) => {
+    const { label, detail } = describe(e.payload);
+    return `<div class="list-row"><div style="flex:1"><div class="row-value" style="font-size:12.5px">${label}</div><div class="hint" style="margin:2px 0 0">${detail}</div></div></div>`;
+  }).join('');
 }
 
 function activeContinuum(root) {
@@ -168,7 +164,7 @@ function activeContinuum(root) {
 
   root.innerHTML = `
     <div class="top-bar">
-      <div class="wordmark">AIWA <em>chain</em></div>
+      <div style="display:flex; align-items:center; gap:10px"><div class="wordmark">AIWA <em>chain</em></div><a href="https://github.com/theodoreyong9/AIWA_chain" target="_blank" rel="noopener" class="gh-link" title="View source on GitHub">GitHub</a><a href="YELLOWPAPER.pdf" target="_blank" class="gh-link" title="Read the Yellow Paper (PDF)">Yellow Paper</a></div>
       <div style="display:flex; align-items:center; gap:8px">
         <div class="address-chip" id="addr-copy" title="Click to copy">${short(state.domainId, 10)}</div>
         <button class="ghost" id="disconnect-btn" style="padding:5px 10px; font-size:11px">Disconnect</button>
@@ -181,7 +177,7 @@ function activeContinuum(root) {
     </div>
 
     <div class="hero">
-      <div class="hero-balance ${recentTick ? 'pulse' : ''}">${formatAiwaAmount(total)}</div>
+      <div class="hero-balance ${recentTick ? 'pulse' : ''}">${formatHeroBalance(total)}</div>
       <div class="hero-unit">AIWA</div>
       <div class="status-line">
         <span class="status-dot ${recentTick ? 'continuous' : 'partitioned'}"></span>
@@ -192,9 +188,10 @@ function activeContinuum(root) {
 
     <div class="card">
       <div class="card-title">Position</div>
-      <div class="row"><span class="row-label">Committed</span><span class="row-value">${position ? position.b : 0}</span></div>
-      <div class="row"><span class="row-label">Claimable now</span><span class="row-value">${formatAiwaAmount(claimable)}</span></div>
-      <div class="row"><span class="row-label">Already in wallet</span><span class="row-value">${formatAiwaAmount(spendable)}</span></div>
+      <div class="row"><span class="row-label">Committed capital</span><span class="row-value">${position ? position.b : 0} SOL</span></div>
+      <div class="row"><span class="row-label">Claimable now</span><span class="row-value">${formatAiwaAmount(claimable)} AIWA</span></div>
+      <div class="row"><span class="row-label">Already in wallet</span><span class="row-value">${formatAiwaAmount(spendable)} AIWA</span></div>
+      <p class="hint">Claimable + already in wallet = the total above.</p>
       <div class="btn-row">
         <button class="primary" id="claim-btn" ${claimable <= 0n ? 'disabled' : ''}>Claim</button>
       </div>
@@ -235,8 +232,8 @@ function activeContinuum(root) {
     </div>
 
     <div class="card">
-      <div class="card-title">Trajectory</div>
-      ${trajectorySvg()}
+      <div class="card-title">Recent activity</div>
+      ${activityLog()}
     </div>
 
     <div class="card">

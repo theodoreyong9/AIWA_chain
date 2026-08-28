@@ -105,26 +105,27 @@ function p2pStatusHtml() {
   }
   if (p2pStatus === 'awaiting-answer') {
     return `
-      <p class="hint">Send this real connection offer to the other person, then paste their real answer below.</p>
+      <p class="hint">Send this text to the other person (chat, email, however). Once they answer your call, paste what they send back below.</p>
       <textarea id="p2p-offer-display" readonly style="min-height:70px; font-size:10px">${p2pOfferBlob}</textarea>
       <div class="btn-row"><button id="p2p-copy-offer">Copy</button></div>
       <label class="field-label" style="margin-top:14px">Their answer</label>
-      <textarea id="p2p-answer-input" placeholder="paste their real answer blob here" style="min-height:70px; font-size:10px"></textarea>
+      <textarea id="p2p-answer-input" placeholder="paste what they send back here" style="min-height:70px; font-size:10px"></textarea>
       <div class="btn-row"><button class="primary" id="p2p-complete-btn">Complete connection</button><button class="ghost" id="p2p-cancel-btn">Cancel</button></div>
       <div id="p2p-msg">${p2pMsg ?? ''}</div>
     `;
   }
   if (p2pStatus === 'awaiting-completion') {
     return `
-      <p class="hint">Send this real answer back to whoever sent you the offer. The connection completes on their side.</p>
+      <p class="hint">Send this text back to whoever's call you just answered. The connection completes automatically on their side once they paste it in.</p>
       <textarea id="p2p-answer-display" readonly style="min-height:70px; font-size:10px">${p2pAnswerBlob}</textarea>
       <div class="btn-row"><button id="p2p-copy-answer">Copy</button><button class="ghost" id="p2p-cancel-btn">Cancel</button></div>
     `;
   }
   return `
-    <div class="btn-row"><button class="primary" id="p2p-start-btn">Start a connection</button></div>
-    <label class="field-label" style="margin-top:14px">Or accept someone else's offer</label>
-    <textarea id="p2p-offer-input" placeholder="paste a real offer blob here" style="min-height:70px; font-size:10px"></textarea>
+    <p class="hint">Exactly like a phone call: one of you calls, the other answers \u2014 doesn't matter who. Calling: click Start, send the resulting text to the other person, then paste back the answer they send you. Answering: paste the text they sent you below, click Accept, then send back the answer this produces.</p>
+    <div class="btn-row"><button class="primary" id="p2p-start-btn">Start a connection (call)</button></div>
+    <label class="field-label" style="margin-top:14px">Or answer someone else's call</label>
+    <textarea id="p2p-offer-input" placeholder="paste the text they sent you here" style="min-height:70px; font-size:10px"></textarea>
     <div class="btn-row"><button id="p2p-accept-btn">Accept</button></div>
     <div id="p2p-msg">${p2pMsg ?? ''}</div>
   `;
@@ -149,7 +150,7 @@ function startP2PConnection() {
 export function renderMirror(root) {
   if (!state.domainId) {
     root.innerHTML = `
-      <div class="top-bar"><div class="wordmark">AIWA <em>chain</em></div></div>
+      <div class="top-bar"><div style="display:flex; align-items:center; gap:10px"><div class="wordmark">AIWA <em>chain</em></div><a href="https://github.com/theodoreyong9/AIWA_chain" target="_blank" rel="noopener" class="gh-link" title="View source on GitHub">GitHub</a><a href="YELLOWPAPER.pdf" target="_blank" class="gh-link" title="Read the Yellow Paper (PDF)">Yellow Paper</a></div></div>
       <div class="tabs">
         <div class="tab" data-tab="continuum">Continuum</div>
         <div class="tab active" data-tab="mirror">Mirror</div>
@@ -166,7 +167,7 @@ export function renderMirror(root) {
 
   root.innerHTML = `
     <div class="top-bar">
-      <div class="wordmark">AIWA <em>chain</em></div>
+      <div style="display:flex; align-items:center; gap:10px"><div class="wordmark">AIWA <em>chain</em></div><a href="https://github.com/theodoreyong9/AIWA_chain" target="_blank" rel="noopener" class="gh-link" title="View source on GitHub">GitHub</a><a href="YELLOWPAPER.pdf" target="_blank" class="gh-link" title="Read the Yellow Paper (PDF)">Yellow Paper</a></div>
       <div style="display:flex; align-items:center; gap:8px">
         <div class="address-chip" id="addr-copy" title="Click to copy">${short(state.domainId, 10)}</div>
         <button class="ghost" id="disconnect-btn" style="padding:5px 10px; font-size:11px">Disconnect</button>
@@ -198,7 +199,7 @@ export function renderMirror(root) {
 
     <div class="card">
       <div class="card-title">Reconciliation by file</div>
-      <p class="hint">The fallback when a live connection isn't possible \u2014 carried by hand, like a physically transported drive.</p>
+      <p class="hint">The fallback when a live connection isn't possible right now \u2014 carried by hand, like a physically transported drive. This file contains real, verifiable proof of your own progression too \u2014 but never your secret key. Importing it elsewhere lets that device know your history happened; it can never act as you (claim, send) without your key or passphrase separately.</p>
       <div class="btn-row"><button id="export-btn">Export your history</button></div>
       <label class="field-label" style="margin-top:14px">Import a real history file</label>
       <input type="file" id="import-file" accept="application/json" />

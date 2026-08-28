@@ -30,11 +30,24 @@ async function refreshBalance() {
 }
 
 let lastRefreshedFor = null;
+let autoRefreshInterval = null;
+
+function startAutoRefresh() {
+  if (autoRefreshInterval) return;
+  autoRefreshInterval = setInterval(() => {
+    if (state.activeTab !== 'ignition' || !state.domainId) {
+      clearInterval(autoRefreshInterval);
+      autoRefreshInterval = null;
+      return;
+    }
+    refreshBalance();
+  }, 20000);
+}
 
 export function renderIgnition(root) {
   if (!state.domainId) {
     root.innerHTML = `
-      <div class="top-bar"><div class="wordmark">AIWA <em>chain</em></div></div>
+      <div class="top-bar"><div style="display:flex; align-items:center; gap:10px"><div class="wordmark">AIWA <em>chain</em></div><a href="https://github.com/theodoreyong9/AIWA_chain" target="_blank" rel="noopener" class="gh-link" title="View source on GitHub">GitHub</a><a href="YELLOWPAPER.pdf" target="_blank" class="gh-link" title="Read the Yellow Paper (PDF)">Yellow Paper</a></div></div>
       <div class="tabs">
         <div class="tab" data-tab="continuum">Continuum</div>
         <div class="tab" data-tab="mirror">Mirror</div>
@@ -50,6 +63,7 @@ export function renderIgnition(root) {
     lastRefreshedFor = state.domainId;
     refreshBalance();
   }
+  startAutoRefresh();
 
   const balance = solBalanceLamports !== null ? (solBalanceLamports / 1e9).toFixed(6) : '\u2014';
   const identityCostState = state.identityCost;
@@ -57,7 +71,7 @@ export function renderIgnition(root) {
 
   root.innerHTML = `
     <div class="top-bar">
-      <div class="wordmark">AIWA <em>chain</em></div>
+      <div style="display:flex; align-items:center; gap:10px"><div class="wordmark">AIWA <em>chain</em></div><a href="https://github.com/theodoreyong9/AIWA_chain" target="_blank" rel="noopener" class="gh-link" title="View source on GitHub">GitHub</a><a href="YELLOWPAPER.pdf" target="_blank" class="gh-link" title="Read the Yellow Paper (PDF)">Yellow Paper</a></div>
       <div style="display:flex; align-items:center; gap:8px">
         <div class="address-chip" id="addr-copy" title="Click to copy">${short(state.keypair.publicKey.toBase58(), 10)}</div>
         <button class="ghost" id="disconnect-btn" style="padding:5px 10px; font-size:11px">Disconnect</button>
@@ -97,6 +111,12 @@ export function renderIgnition(root) {
     </div>
 
     <div class="card">
+      <div class="card-title">Devnet faucet</div>
+      <p class="hint">Free devnet SOL for testing \u2014 opens Solana's own real faucet in a new tab, with your address copied to your clipboard first.</p>
+      <div class="btn-row"><button id="faucet-btn">Get devnet SOL</button></div>
+    </div>
+
+    <div class="card">
       <div class="card-title">Refresh</div>
       <div class="btn-row"><button id="refresh-btn">Refresh SOL balance</button></div>
     </div>
@@ -108,6 +128,10 @@ export function renderIgnition(root) {
     if (!confirm('Disconnect from this identity? Your real history stays saved on this device (IndexedDB) and can be restored with your secret key \u2014 this only stops acting as it right now.')) return;
     disconnect();
     render();
+  });
+  root.querySelector('#faucet-btn').addEventListener('click', () => {
+    navigator.clipboard?.writeText(state.keypair.publicKey.toBase58());
+    window.open(networkConfigDevnet.faucet, '_blank', 'noopener');
   });
   root.querySelector('#refresh-btn').addEventListener('click', refreshBalance);
   root.querySelector('#burn-btn').addEventListener('click', () => doBurn(root));

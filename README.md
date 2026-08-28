@@ -18,6 +18,16 @@ Progression is bound to real, sequential computation (a VDF) — never a shared 
 
 Published proposals for interplanetary cryptocurrency generally keep one, Earth-anchored consensus chain and add delay-tolerant transport, wider payment-channel timelocks, and federated settlement on top — a real, workable answer for transferring already-created value under real latency. That approach carries a real, acknowledged cost on the other half of the problem: value *creation* stays dominated by whichever side has more real compute, since mining from Mars against Earth's own hashpower is, by that same literature's own account, structurally unprofitable. This project takes value creation itself off any consensus chain entirely — a domain creates real, VDF-bound value at its own real pace, from its own committed capital, with zero dependency on anyone else's compute or connectivity; reconciliation only ever adds a real, informational signal afterward, never a correction. See `docs/YELLOWPAPER.md` §11.1 for the fuller, cited version of this — including what still isn't solved here (the real transport itself, and any real exchange rate between two economies that grew up apart).
 
+## Yellow Paper, in LaTeX and as a real PDF
+
+`docs/YELLOWPAPER.tex` is the real, source-of-truth LaTeX version — `docs/YELLOWPAPER.md` stays as the plain-text version for reading directly on GitHub. `public/YELLOWPAPER.pdf` is a real, pre-built PDF (compiled and visually verified page by page before being committed), served directly by the app itself — the "Yellow Paper" link in the top bar of every tab opens it. If you edit the `.tex`, regenerate the PDF and copy it back into `public/`:
+
+```
+cd docs && pdflatex YELLOWPAPER.tex && pdflatex YELLOWPAPER.tex && cp YELLOWPAPER.pdf ../public/
+```
+
+(twice, so LaTeX's own cross-references resolve correctly — the first pass leaves them as `??`).
+
 ## Architecture
 
 ```
