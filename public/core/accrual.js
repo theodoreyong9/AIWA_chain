@@ -34,12 +34,12 @@ function currentlyClaimable(rewardParams, state, domain) {
   return reward(position.b, t, currentEpoch, position.T ?? 0, rewardParams);
 }
 
-export async function applyAccrualEvent(rewardParams, state, event) {
+export async function applyAccrualEvent(rewardParams, state, event, verifyFn) {
   const payload = event.payload;
   if (!payload || typeof payload.type !== 'string') return state;
 
   if (payload.type === 'progression') {
-    return { ...state, progression: await applyProgressionEvent(state.progression, event) };
+    return { ...state, progression: await applyProgressionEvent(state.progression, event, verifyFn) };
   }
 
   if (payload.type === 'accrual') {
@@ -83,9 +83,9 @@ export async function applyAccrualEvent(rewardParams, state, event) {
   return state;
 }
 
-export async function materializeAccrual(rewardParams, orderedEvents) {
+export async function materializeAccrual(rewardParams, orderedEvents, verifyFn) {
   let state = initialAccrualState();
-  for (const event of orderedEvents) state = await applyAccrualEvent(rewardParams, state, event);
+  for (const event of orderedEvents) state = await applyAccrualEvent(rewardParams, state, event, verifyFn);
   return state;
 }
 

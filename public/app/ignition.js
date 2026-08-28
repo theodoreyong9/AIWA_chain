@@ -1,7 +1,7 @@
 import { state, short } from './state.js';
 import { render, applyIncremental } from './app.js';
 import { networkConfigDevnet } from './network.js';
-import { loadSolanaWeb3, broadcastBurnTransaction } from '../core/solana-wallet.js';
+import { loadSolanaWeb3, broadcastBurnTransaction, broadcastTransferTransaction } from '../core/solana-wallet.js';
 import { hasIdentityCost } from '../core/identity-cost.js';
 import { deriveIdentityCostState } from './identity-cost-view.js';
 import { disconnect } from './identity.js';
@@ -10,6 +10,8 @@ let connection = null;
 let solBalanceLamports = null;
 let busy = false;
 let lastMsg = null;
+let sendBusy = false;
+let lastSendMsg = null;
 
 async function getConnection() {
   if (connection) return connection;
@@ -50,7 +52,8 @@ export function renderIgnition(root) {
   }
 
   const balance = solBalanceLamports !== null ? (solBalanceLamports / 1e9).toFixed(6) : '\u2014';
-  const already = hasIdentityCost(state.identityCost, state.domainId);
+  const identityCostState = state.identityCost;
+  const already = hasIdentityCost(identityCostState, state.domainId);
 
   root.innerHTML = `
     <div class="top-bar">
@@ -70,6 +73,7 @@ export function renderIgnition(root) {
       <div class="hero-balance">${balance}</div>
       <div class="hero-unit">SOL \u00b7 devnet</div>
       <div class="status-line"><span class="status-dot ${already ? 'continuous' : 'partitioned'}"></span>${already ? 'ignited' : 'not yet ignited'}</div>
+      <p class="hint" style="margin-top:14px; max-width:340px; margin-left:auto; margin-right:auto">This wallet only works with a real path back to Earth's own Solana network \u2014 activating, checking a balance, sending SOL, all need it. Continuum, once ignited, needs none of that ever again.</p>
     </div>
 
     <div class="card">
@@ -79,6 +83,17 @@ export function renderIgnition(root) {
       <input type="text" id="burn-amount" placeholder="0.002" value="0.002" />
       <div class="btn-row"><button class="primary" id="burn-btn" ${busy ? 'disabled' : ''}>Burn & ignite</button></div>
       <div id="burn-msg">${lastMsg ?? ''}</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Send SOL</div>
+      <p class="hint">A real, ordinary transfer \u2014 unlike Ignite, this SOL is recoverable by whoever you send it to, not burned.</p>
+      <label class="field-label">To</label>
+      <input type="text" id="send-sol-to" placeholder="recipient's Solana address" />
+      <label class="field-label">Amount (SOL)</label>
+      <input type="text" id="send-sol-amount" placeholder="0.01" />
+      <div class="btn-row"><button class="primary" id="send-sol-btn" ${sendBusy ? 'disabled' : ''}>Send</button></div>
+      <div id="send-sol-msg">${lastSendMsg ?? ''}</div>
     </div>
 
     <div class="card">
@@ -96,6 +111,7 @@ export function renderIgnition(root) {
   });
   root.querySelector('#refresh-btn').addEventListener('click', refreshBalance);
   root.querySelector('#burn-btn').addEventListener('click', () => doBurn(root));
+  root.querySelector('#send-sol-btn').addEventListener('click', () => doSendSol(root));
 }
 
 async function doBurn(root) {
@@ -112,12 +128,6 @@ async function doBurn(root) {
   try {
     const solanaWeb3 = await loadSolanaWeb3();
     const conn = await getConnection();
-    // state.keypair is the lightweight, @noble/curves-based shape used
-    // everywhere else in this app — reconstructed here into a real
-    // solanaWeb3.Keypair only now, right where a real transaction
-    // actually needs one. Its own secretKey is real and correct (a
-    // genuine 32-byte seed + 32-byte public key), so this recovers the
-    // identical identity, never a different one.
     const realKeypair = solanaWeb3.Keypair.fromSecretKey(state.keypair.secretKey);
     const timeout = (ms) => new Promise((_, reject) => setTimeout(() => reject(new Error(`Timed out after ${ms / 1000}s`)), ms));
     const signature = await Promise.race([broadcastBurnTransaction(solanaWeb3, conn, realKeypair, lamports), timeout(30000)]);
@@ -141,5 +151,32 @@ async function doBurn(root) {
     setMsg(`<div class="msg error">Burn failed: ${e.message}. Check the devnet faucet if your balance is too low.</div>`);
   }
   busy = false;
+  refreshBalance();
+}
+
+async function doSendSol(root) {
+  if (sendBusy) return;
+  sendBusy = true;
+  const msgEl = root.querySelector('#send-sol-msg');
+  const toAddress = root.querySelector('#send-sol-to').value.trim();
+  const solAmount = parseFloat(root.querySelector('#send-sol-amount').value);
+  const setMsg = (html) => { msgEl.innerHTML = html; lastSendMsg = html; };
+
+  if (!toAddress) { setMsg(`<div class="msg error">Enter a recipient address.</div>`); sendBusy = false; return; }
+  if (!Number.isFinite(solAmount) || solAmount <= 0) { setMsg(`<div class="msg error">Enter a positive SOL amount.</div>`); sendBusy = false; return; }
+  const lamports = Math.round(solAmount * 1e9);
+
+  setMsg(`<div class="msg">Broadcasting to devnet\u2026 (times out after 30s)</div>`);
+  try {
+    const solanaWeb3 = await loadSolanaWeb3();
+    const conn = await getConnection();
+    const realKeypair = solanaWeb3.Keypair.fromSecretKey(state.keypair.secretKey);
+    const timeout = (ms) => new Promise((_, reject) => setTimeout(() => reject(new Error(`Timed out after ${ms / 1000}s`)), ms));
+    const signature = await Promise.race([broadcastTransferTransaction(solanaWeb3, conn, realKeypair, toAddress, lamports), timeout(30000)]);
+    setMsg(`<div class="msg ok">Sent \u2014 signature ${short(signature, 8)}.</div>`);
+  } catch (e) {
+    setMsg(`<div class="msg error">Send failed: ${e.message}</div>`);
+  }
+  sendBusy = false;
   refreshBalance();
 }

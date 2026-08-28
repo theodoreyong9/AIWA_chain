@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeVdfChain, vdfSeed } from '../public/core/vdf.js';
+import { computeVdfChain, vdfSeed, verifyVdfChain } from '../public/core/vdf.js';
 import { initialProgressionState, applyProgressionEvent, materializeProgression } from '../public/core/progression.js';
 
 async function progressionPayload(domain, epoch, previousOutput = 'genesis', iterations = 50) {
@@ -28,7 +28,7 @@ test('a transition not chained to the last accepted one is rejected', async () =
   const p1 = await progressionPayload('d', 1);
   state = await applyProgressionEvent(state, { id: 'e1', parents: [], payload: p1 });
   const p2 = await progressionPayload('d', 2, p1.vdfOutput);
-  state = await applyProgressionEvent(state, { id: 'e2', parents: [], payload: p2 }); // missing parent chain
+  state = await applyProgressionEvent(state, { id: 'e2', parents: [], payload: p2 });
   assert.equal(state.domains.d.epoch, 1);
 });
 
@@ -39,7 +39,7 @@ test('a forked competing transition at the same epoch is rejected', async () => 
   const p2a = await progressionPayload('d', 2, p1.vdfOutput);
   state = await applyProgressionEvent(state, { id: 'e2a', parents: ['e1'], payload: p2a });
   const p2b = await progressionPayload('d', 2, p1.vdfOutput);
-  state = await applyProgressionEvent(state, { id: 'e2b', parents: ['e1'], payload: p2b }); // same epoch, different event
+  state = await applyProgressionEvent(state, { id: 'e2b', parents: ['e1'], payload: p2b });
   assert.equal(state.domains.d.lastId, 'e2a');
 });
 
@@ -120,5 +120,36 @@ test('materializeProgression folds a real sequence via a real EventDag-shaped li
     { id: 'e2', parents: ['e1'], payload: p2 },
   ];
   const state = await materializeProgression(events);
+  assert.equal(state.domains.d.epoch, 2);
+});
+
+test('THE REAL INJECTION: a custom verifyFn is genuinely used instead of the default, real recomputation', async () => {
+  let realVerifyCalls = 0;
+  const spy = async (seed, iterations, output) => {
+    realVerifyCalls += 1;
+    return await verifyVdfChain(seed, iterations, output);
+  };
+  const payload = await progressionPayload('d', 1);
+  const state = await applyProgressionEvent(initialProgressionState(), { id: 'e1', parents: [], payload }, spy);
+  assert.equal(realVerifyCalls, 1, 'the injected function must be the one actually invoked');
+  assert.equal(state.domains.d.epoch, 1);
+});
+
+test('SECURITY: an injected verifyFn that always returns false rejects even a real, honestly-computed proof — the caller stays in full control', async () => {
+  const alwaysFalse = async () => false;
+  const payload = await progressionPayload('d', 1);
+  const state = await applyProgressionEvent(initialProgressionState(), { id: 'e1', parents: [], payload }, alwaysFalse);
+  assert.equal(state.domains.d, undefined);
+  assert.equal(state.rejections.length, 1);
+});
+
+test('materializeProgression also accepts and genuinely uses a custom verifyFn', async () => {
+  let calls = 0;
+  const spy = async (seed, iterations, output) => { calls += 1; return await verifyVdfChain(seed, iterations, output); };
+  const p1 = await progressionPayload('d', 1);
+  const p2 = await progressionPayload('d', 2, p1.vdfOutput);
+  const events = [{ id: 'e1', parents: [], payload: p1 }, { id: 'e2', parents: ['e1'], payload: p2 }];
+  const state = await materializeProgression(events, spy);
+  assert.equal(calls, 2);
   assert.equal(state.domains.d.epoch, 2);
 });

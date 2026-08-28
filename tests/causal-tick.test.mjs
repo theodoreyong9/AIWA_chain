@@ -27,7 +27,6 @@ function fundedIdentityCost(state, domain, lamports) {
   const result = registerIdentityCost(state, { domain, tx: { signature: `sig-${domain}`, err: null, incineratorBalanceDeltaLamports: lamports, commitment: 'finalized', slot: 1 } });
   return result.state;
 }
-
 function deriveSourceEpochLookupOverride(orderedEvents) {
   return (sourceDomain, eventId) => {
     const ev = orderedEvents.find((e) => e.id === eventId);
@@ -57,7 +56,6 @@ test('SECURITY: an observer with zero real burn contributes zero weight, even wi
   const signer = makeSigner();
   const observerDomain = await deriveDomainId(signer.pubkeyBytes);
   const targetEvent = { id: 'e5', parents: [], payload: { type: 'progression', domain: 'target', epoch: 5 } };
-  // Deliberately never registering identity-cost for this observer — zero real weight.
   const identityCostState = initialIdentityCostState();
   const payload = await signCommitment(signer, { domain: observerDomain, epoch: 1, kind: 'full', receivedFrom: [{ sourceDomain: 'target', eventId: 'e5' }] });
   const mirrorState = await applyMirrorEvent(initialMirrorState(), { id: 'm1', payload: { type: 'reception', ...payload } }, deriveSourceEpochLookupOverride([targetEvent]));
@@ -75,7 +73,6 @@ test('SECURITY: real majority weight determines the tick even against a funded b
   let identityCostState = initialIdentityCostState();
   const lookup = deriveSourceEpochLookupOverride(orderedEvents);
 
-  // Three real, honest, well-funded observers agreeing on epoch 100.
   for (let i = 0; i < 3; i++) {
     const signer = makeSigner();
     const domain = await deriveDomainId(signer.pubkeyBytes);
@@ -83,7 +80,6 @@ test('SECURITY: real majority weight determines the tick even against a funded b
     const payload = await signCommitment(signer, { domain, epoch: 1, kind: 'full', receivedFrom: [{ sourceDomain: 'target', eventId: 'e100' }] });
     mirrorState = await applyMirrorEvent(mirrorState, { id: `m-honest-${i}`, payload: { type: 'reception', ...payload } }, lookup);
   }
-  // One adversarial observer, funded, but a real minority of total weight (9999 vs 30000 honest).
   const attacker = makeSigner();
   const attackerDomain = await deriveDomainId(attacker.pubkeyBytes);
   identityCostState = fundedIdentityCost(identityCostState, attackerDomain, 9999);
@@ -159,13 +155,13 @@ test('HARDWARE IS AN OPTIONAL SIGNAL, NEVER A WEIGHT: a hardware-backed observer
   const targetEvent = { id: 'e5', parents: [], payload: { type: 'progression', domain: 'target', epoch: 5 } };
   const lookup = deriveSourceEpochLookupOverride([targetEvent]);
 
-  const signerA = makeSigner(); // no hardware
+  const signerA = makeSigner();
   const domainA = await deriveDomainId(signerA.pubkeyBytes);
-  const signerB = makeSigner(); // will be hardware-backed
+  const signerB = makeSigner();
   const domainB = await deriveDomainId(signerB.pubkeyBytes);
 
   let identityCostState = fundedIdentityCost(initialIdentityCostState(), domainA, 1000);
-  identityCostState = fundedIdentityCost(identityCostState, domainB, 1000); // identical real weight
+  identityCostState = fundedIdentityCost(identityCostState, domainB, 1000);
 
   let mirrorState = initialMirrorState();
   const payloadA = await signCommitment(signerA, { domain: domainA, epoch: 1, kind: 'full', receivedFrom: [{ sourceDomain: 'target', eventId: 'e5' }] });
@@ -187,4 +183,122 @@ test('HARDWARE IS AN OPTIONAL SIGNAL, NEVER A WEIGHT: a hardware-backed observer
   assert.equal(result.totalWeight, 2000, 'both observers contribute the identical, real burn-based weight regardless of hardware');
   assert.equal(result.hardwareBackedWeight, 1000, 'only the real, hardware-attested observer is reported as hardware-backed');
   assert.equal(result.hardwareBackedObservers, 1);
+});
+
+test('SECURITY, THE REAL BUG FOUND AND FIXED: replaying the identical reception commitment gives zero additional influence', async () => {
+  const signer = makeSigner();
+  const observerDomain = await deriveDomainId(signer.pubkeyBytes);
+  const targetEvent = { id: 'e5', parents: [], payload: { type: 'progression', domain: 'target', epoch: 5 } };
+  const identityCostState = fundedIdentityCost(initialIdentityCostState(), observerDomain, 1000);
+  const lookup = deriveSourceEpochLookupOverride([targetEvent]);
+
+  let mirrorState = initialMirrorState();
+  for (let epoch = 1; epoch <= 2; epoch++) {
+    const payload = await signCommitment(signer, { domain: observerDomain, epoch, kind: 'full', receivedFrom: [{ sourceDomain: 'target', eventId: 'e5' }] });
+    mirrorState = await applyMirrorEvent(mirrorState, { id: `m${epoch}`, payload: { type: 'reception', ...payload } }, lookup);
+  }
+
+  const result = await computeCausalTick(mirrorState, identityCostState, [targetEvent], 'target');
+  assert.equal(result.totalWeight, 1000, 'the real observer\'s real burn must be counted exactly once, never once per historical mention of the same fact');
+  assert.equal(result.observationCount, 1);
+});
+
+test('an observer who has evolved their real knowledge over time contributes their single, most-recent observation, not an accumulation', async () => {
+  const signer = makeSigner();
+  const observerDomain = await deriveDomainId(signer.pubkeyBytes);
+  const targetEventOld = { id: 'e5', parents: [], payload: { type: 'progression', domain: 'target', epoch: 5 } };
+  const targetEventNew = { id: 'e9', parents: [], payload: { type: 'progression', domain: 'target', epoch: 9 } };
+  const identityCostState = fundedIdentityCost(initialIdentityCostState(), observerDomain, 1000);
+  const lookup = deriveSourceEpochLookupOverride([targetEventOld, targetEventNew]);
+
+  let mirrorState = initialMirrorState();
+  const p1 = await signCommitment(signer, { domain: observerDomain, epoch: 1, kind: 'full', receivedFrom: [{ sourceDomain: 'target', eventId: 'e5' }] });
+  mirrorState = await applyMirrorEvent(mirrorState, { id: 'm1', payload: { type: 'reception', ...p1 } }, lookup);
+  const p2 = await signCommitment(signer, { domain: observerDomain, epoch: 2, kind: 'full', receivedFrom: [{ sourceDomain: 'target', eventId: 'e9' }] });
+  mirrorState = await applyMirrorEvent(mirrorState, { id: 'm2', payload: { type: 'reception', ...p2 } }, lookup);
+
+  const result = await computeCausalTick(mirrorState, identityCostState, [targetEventOld, targetEventNew], 'target');
+  assert.equal(result.observationCount, 1, 'one real observer, one real current-knowledge estimate — never accumulated across their own history');
+  assert.equal(result.tick, 9, 'the more recent, more advanced real observation is what a single real observer\'s current knowledge actually is');
+  assert.equal(result.totalWeight, 1000);
+});
+
+test('DOMAIN INVARIANCE: computeCausalTick is a pure function — identical evidence always produces the identical result, regardless of which domain asks', async () => {
+  const signer = makeSigner();
+  const observerDomain = await deriveDomainId(signer.pubkeyBytes);
+  const targetEvent = { id: 'e7', parents: [], payload: { type: 'progression', domain: 'target', epoch: 7 } };
+  const identityCostState = fundedIdentityCost(initialIdentityCostState(), observerDomain, 1000);
+  const payload = await signCommitment(signer, { domain: observerDomain, epoch: 1, kind: 'full', receivedFrom: [{ sourceDomain: 'target', eventId: 'e7' }] });
+  const mirrorState = await applyMirrorEvent(initialMirrorState(), { id: 'm1', payload: { type: 'reception', ...payload } }, deriveSourceEpochLookupOverride([targetEvent]));
+
+  const fromEarth = await computeCausalTick(mirrorState, identityCostState, [targetEvent], 'target');
+  const fromMars = await computeCausalTick(mirrorState, identityCostState, [targetEvent], 'target');
+  assert.deepEqual(fromEarth, fromMars, 'the identical real evidence must produce the identical real result no matter who computes it');
+});
+
+test('SECURITY, THE REAL SYBIL PROPERTY: many low-burn identities do not out-weigh fewer, well-funded real domains', async () => {
+  const targetEvent = { id: 'e50', parents: [], payload: { type: 'progression', domain: 'target', epoch: 50 } };
+  const fakeEvent = { id: 'e-fake', parents: [], payload: { type: 'progression', domain: 'target', epoch: 999999 } };
+  const orderedEvents = [targetEvent, fakeEvent];
+  const lookup = deriveSourceEpochLookupOverride(orderedEvents);
+
+  let mirrorState = initialMirrorState();
+  let identityCostState = initialIdentityCostState();
+
+  for (let i = 0; i < 2; i++) {
+    const signer = makeSigner();
+    const domain = await deriveDomainId(signer.pubkeyBytes);
+    identityCostState = fundedIdentityCost(identityCostState, domain, 50000);
+    const payload = await signCommitment(signer, { domain, epoch: 1, kind: 'full', receivedFrom: [{ sourceDomain: 'target', eventId: 'e50' }] });
+    mirrorState = await applyMirrorEvent(mirrorState, { id: `honest-${i}`, payload: { type: 'reception', ...payload } }, lookup);
+  }
+
+  for (let i = 0; i < 20; i++) {
+    const signer = makeSigner();
+    const domain = await deriveDomainId(signer.pubkeyBytes);
+    identityCostState = fundedIdentityCost(identityCostState, domain, 1000);
+    const payload = await signCommitment(signer, { domain, epoch: 1, kind: 'full', receivedFrom: [{ sourceDomain: 'target', eventId: 'e-fake' }] });
+    mirrorState = await applyMirrorEvent(mirrorState, { id: `sybil-${i}`, payload: { type: 'reception', ...payload } }, lookup);
+  }
+
+  const result = await computeCausalTick(mirrorState, identityCostState, orderedEvents, 'target');
+  assert.equal(result.tick, 50, `20 low-burn identities (${20 * 1000} total) must not outweigh 2 real, well-funded domains (${2 * 50000} total) — got tick=${result.tick}`);
+});
+
+test('THE EARTH/MARS TEST: two domains with genuinely different local progressions compute the identical comparable coordinate for a shared, externally-observed target', async () => {
+  // Earth and Mars never synchronize with each other at all — they
+  // only both happen to have real, signed reception commitments
+  // about the SAME real target domain, each independently derived
+  // from the identical underlying causal content (content-addressed,
+  // so transport path never matters — see event-dag.test.mjs's own
+  // "TRANSPORT INVARIANCE" test).
+  const targetEvent = { id: 'e42', parents: [], payload: { type: 'progression', domain: 'shared-target', epoch: 42 } };
+  const lookup = deriveSourceEpochLookupOverride([targetEvent]);
+
+  const earthSigner = makeSigner();
+  const earthDomain = await deriveDomainId(earthSigner.pubkeyBytes);
+  const marsSigner = makeSigner();
+  const marsDomain = await deriveDomainId(marsSigner.pubkeyBytes);
+
+  // Earth and Mars each really burned different, real amounts —
+  // their own local histories are otherwise completely unrelated
+  // (10,000 vs 7,000 "local progression", never compared directly).
+  let identityCostState = fundedIdentityCost(initialIdentityCostState(), earthDomain, 10000);
+  identityCostState = fundedIdentityCost(identityCostState, marsDomain, 7000);
+
+  let mirrorState = initialMirrorState();
+  const earthPayload = await signCommitment(earthSigner, { domain: earthDomain, epoch: 1, kind: 'full', receivedFrom: [{ sourceDomain: 'shared-target', eventId: 'e42' }] });
+  mirrorState = await applyMirrorEvent(mirrorState, { id: 'earth-obs', payload: { type: 'reception', ...earthPayload } }, lookup);
+  const marsPayload = await signCommitment(marsSigner, { domain: marsDomain, epoch: 1, kind: 'full', receivedFrom: [{ sourceDomain: 'shared-target', eventId: 'e42' }] });
+  mirrorState = await applyMirrorEvent(mirrorState, { id: 'mars-obs', payload: { type: 'reception', ...marsPayload } }, lookup);
+
+  // Whoever asks — Earth's own software, Mars's own software, or a
+  // third party entirely — recomputing from the identical real
+  // evidence gives the identical real, comparable coordinate for the
+  // shared target. Neither Earth's nor Mars's own, unrelated local
+  // progression enters into it at all.
+  const result = await computeCausalTick(mirrorState, identityCostState, [targetEvent], 'shared-target');
+  assert.equal(result.tick, 42);
+  assert.equal(result.totalWeight, 17000);
+  assert.equal(result.observationCount, 2);
 });

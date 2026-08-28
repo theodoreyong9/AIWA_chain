@@ -3,14 +3,13 @@ import assert from 'node:assert/strict';
 import { modPow, isProbablePrime, hashToPrime } from '../public/core/bigint-math.js';
 
 test('modPow matches hand-computable small cases', () => {
-  assert.equal(modPow(2n, 10n, 1000n), 24n); // 2^10 = 1024, mod 1000 = 24
-  assert.equal(modPow(3n, 4n, 5n), 1n); // 3^4 = 81, mod 5 = 1
-  assert.equal(modPow(5n, 0n, 7n), 1n); // any base ^ 0 = 1
-  assert.equal(modPow(7n, 1n, 5n), 2n); // 7 mod 5 = 2
+  assert.equal(modPow(2n, 10n, 1000n), 24n);
+  assert.equal(modPow(3n, 4n, 5n), 1n);
+  assert.equal(modPow(5n, 0n, 7n), 1n);
+  assert.equal(modPow(7n, 1n, 5n), 2n);
 });
 
 test('modPow matches a real, independently-verifiable large case', () => {
-  // 2^64 mod (2^31 - 1), computed independently via Python: pow(2,64,2**31-1) = 4
   assert.equal(modPow(2n, 64n, (1n << 31n) - 1n), 4n);
 });
 
@@ -27,14 +26,10 @@ test('isProbablePrime correctly rejects small known composites', () => {
 });
 
 test('isProbablePrime correctly identifies a real, large known prime (a Mersenne prime exponent case)', () => {
-  // 2^127 - 1 is a real, well-known Mersenne prime (verified independently)
   assert.equal(isProbablePrime((1n << 127n) - 1n), true);
 });
 
 test('isProbablePrime correctly rejects a known Carmichael number — the exact case naive Fermat tests get wrong', () => {
-  // 561 = 3 x 11 x 17, the smallest Carmichael number — passes Fermat's
-  // test for every base coprime to it, but Miller-Rabin correctly
-  // rejects it. A real, meaningful test, not a coincidence.
   assert.equal(isProbablePrime(561n), false);
 });
 

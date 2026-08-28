@@ -1,7 +1,6 @@
 // Modular exponentiation, Miller-Rabin primality testing, and
 // hash-to-prime — the real, low-level primitives a Wesolowski VDF is
-// built from. Verified against known, hand-computable test vectors,
-// not merely "it ran without throwing".
+// built from.
 
 export function modPow(base, exponent, modulus) {
   if (modulus === 1n) return 0n;
@@ -18,8 +17,8 @@ export function modPow(base, exponent, modulus) {
 
 // Miller-Rabin, deterministic for the bases below — correct for any
 // n < 3,317,044,064,679,887,385,961,981 (far beyond what a real
-// hash-to-prime output for this VDF ever needs), and probabilistic
-// with negligible error otherwise. Real, standard witness set.
+// hash-to-prime output for this VDF ever needs), probabilistic with
+// negligible error otherwise.
 const MILLER_RABIN_WITNESSES = [2n, 3n, 5n, 7n, 11n, 13n, 17n, 19n, 23n, 29n, 31n, 37n];
 
 export function isProbablePrime(n) {
@@ -52,8 +51,7 @@ function bytesToBigInt(bytes) {
 
 // Deterministic prime derivation via Fiat-Shamir: hash real inputs,
 // then walk forward (odd candidates only) to the next real prime,
-// verified by isProbablePrime — never trusted from a table or a
-// single, unverified primality claim.
+// verified by isProbablePrime — never trusted from a table.
 export async function hashToPrime(message, bitLength = 128) {
   const digest = await crypto.subtle.digest('SHA-256', message);
   let candidate = bytesToBigInt(new Uint8Array(digest)) % (1n << BigInt(bitLength));

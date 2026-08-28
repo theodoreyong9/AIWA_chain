@@ -6,10 +6,6 @@ import { fromUnits } from '../public/core/units.js';
 
 const rewardParams = { alpha: 1.1, beta: 2.2, gamma: 3, C: Math.pow(33, 3), minQ: 1 };
 
-// Advances `domain` by `count` real progression epochs, continuing
-// from whatever real vdfOutput/epoch it is already at (read back from
-// state itself, never tracked separately) — one real, unambiguous
-// source of truth for "where this domain's chain currently is".
 async function advanceEpochs(state, domain, count) {
   const current = state.progression.domains[domain] ?? { epoch: 0, vdfOutput: null, lastId: null };
   let epoch = current.epoch;
@@ -40,6 +36,20 @@ test('a second accrual event adds to the already-committed capital', async () =>
   state = await applyAccrualEvent(rewardParams, state, { id: 'a1', parents: [], payload: { type: 'accrual', domain: 'd', b: 10 } });
   state = await applyAccrualEvent(rewardParams, state, { id: 'a2', parents: ['a1'], payload: { type: 'accrual', domain: 'd', b: 5 } });
   assert.equal(state.positions.d.b, 15);
+});
+
+test('THE REAL FIX, VERIFIED ON A SECOND BURN: a later accrual event on an already-matured position resets the patience clock too, not just the first one', async () => {
+  let state = await advanceEpochs(initialAccrualState(), 'd', 10);
+  state = await applyAccrualEvent(rewardParams, state, { id: 'a1', parents: [], payload: { type: 'accrual', domain: 'd', b: 5 } });
+  assert.equal(state.positions.d.lastActionEpoch, 10);
+
+  state = await advanceEpochs(state, 'd', 20);
+  const claimableBeforeSecondBurn = claimableNow(rewardParams, state, 'd');
+  assert.ok(claimableBeforeSecondBurn > 0n, 'the position must have genuinely matured before the second burn');
+
+  state = await applyAccrualEvent(rewardParams, state, { id: 'a2', parents: ['a1'], payload: { type: 'accrual', domain: 'd', b: 5 } });
+  assert.equal(state.positions.d.lastActionEpoch, 30, 'must update to the real, current epoch — not stay stuck at the first burn\'s epoch');
+  assert.equal(claimableNow(rewardParams, state, 'd'), 0n, 'claimable must drop back to zero right after the second burn too — t genuinely resets every time, not only once');
 });
 
 test('claimableNow reflects real, positive reward once epochs have passed since the position opened', async () => {
@@ -80,6 +90,24 @@ test('THE REAL FIX: claiming resets the patience clock — claimableNow drops ri
 
   const claimableRightAfter = claimableNow(rewardParams, state, 'd');
   assert.ok(claimableRightAfter < claimableBefore, 'the clock must reset — at the identical real epoch, claiming again should yield far less');
+});
+
+test('THE REAL FIX, VERIFIED ON A SECOND CLAIM: claiming a second time, well after the first, resets the patience clock again from that real, current epoch — never from the first claim', async () => {
+  let state = await advanceEpochs(initialAccrualState(), 'd', 5);
+  state = await applyAccrualEvent(rewardParams, state, { id: 'a1', parents: [], payload: { type: 'accrual', domain: 'd', b: 10 } });
+  state = await advanceEpochs(state, 'd', 10);
+  const firstClaimAmount = fromUnits(claimableNow(rewardParams, state, 'd'));
+  state = await applyAccrualEvent(rewardParams, state, { id: 'c1', parents: [], payload: { type: 'claim', domain: 'd', amount: firstClaimAmount } });
+  const epochAfterFirstClaim = state.positions.d.lastActionEpoch;
+
+  state = await advanceEpochs(state, 'd', 15);
+  const claimableBeforeSecond = claimableNow(rewardParams, state, 'd');
+  assert.ok(claimableBeforeSecond > 0n, 'must have genuinely matured again since the first claim');
+
+  const secondClaimAmount = fromUnits(claimableBeforeSecond);
+  state = await applyAccrualEvent(rewardParams, state, { id: 'c2', parents: ['c1'], payload: { type: 'claim', domain: 'd', amount: secondClaimAmount } });
+  assert.notEqual(state.positions.d.lastActionEpoch, epochAfterFirstClaim, 'must move forward, not stay pinned to the first claim\'s epoch');
+  assert.equal(claimableNow(rewardParams, state, 'd'), 0n, 'claimable must drop back to zero right after the second claim too');
 });
 
 test('SECURITY, THE REAL BUG FOUND AND FIXED: no payload field can fabricate an early reference epoch', async () => {

@@ -59,7 +59,7 @@ button.primary:hover { background: #d99c53; }
 button.ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
 button.ghost:hover { color: var(--text); }
 
-input {
+input, textarea {
   font-family: var(--font-mono);
   font-size: 13px;
   background: var(--bg);
@@ -69,8 +69,9 @@ input {
   padding: 10px 12px;
   width: 100%;
 }
-input:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; }
-input::placeholder { color: var(--text-faint); }
+input:focus-visible, textarea:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; }
+input::placeholder, textarea::placeholder { color: var(--text-faint); }
+textarea { resize: vertical; }
 
 label.field-label {
   display: block;
@@ -138,7 +139,6 @@ label.field-label {
   letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
 }
-.hero-balance .frac { color: var(--text-dim); font-weight: 400; }
 .hero-unit {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -202,35 +202,6 @@ label.field-label {
 .msg.ok { background: rgba(122, 155, 118, 0.12); color: var(--moss); }
 .msg.error { background: rgba(180, 90, 70, 0.12); color: #c98167; }
 
-/* ── Timeline ───────────────────────────────────────── */
-
-.timeline { position: relative; padding-left: 20px; }
-.timeline::before {
-  content: '';
-  position: absolute;
-  left: 4px;
-  top: 6px;
-  bottom: 6px;
-  width: 1px;
-  background: var(--border);
-}
-.timeline-item { position: relative; padding-bottom: 18px; }
-.timeline-item:last-child { padding-bottom: 0; }
-.timeline-dot {
-  position: absolute;
-  left: -20px;
-  top: 4px;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--surface-2);
-  border: 1px solid var(--amber-dim);
-}
-.timeline-item.genesis .timeline-dot { background: var(--amber); border-color: var(--amber); }
-.timeline-label { font-size: 13px; }
-.timeline-meta { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
-.timeline-empty { color: var(--text-faint); font-size: 12.5px; padding: 4px 0; }
-
 /* ── Proof of Irreversibility ───────────────────────── */
 
 .proof-row { display: flex; gap: 18px; }
@@ -242,6 +213,7 @@ label.field-label {
 .mono-id { font-family: var(--font-mono); font-size: 12px; word-break: break-all; color: var(--text-dim); }
 .empty-state { text-align: center; padding: 30px 10px; color: var(--text-dim); font-size: 13px; }
 .empty-state .glyph { font-size: 22px; margin-bottom: 10px; color: var(--text-faint); }
+.timeline-empty { color: var(--text-faint); font-size: 12.5px; padding: 4px 0; }
 
 @media (prefers-reduced-motion: reduce) {
   .hero-balance.pulse, .status-dot.continuous { animation: none; }

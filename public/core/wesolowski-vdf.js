@@ -2,8 +2,8 @@
 // real sequential modular squarings; verification requires only two
 // modular exponentiations plus O(log T) work to derive the challenge
 // — genuinely cheap, regardless of how large T is. This is what
-// progression.js's own simple hash chain cannot offer: there,
-// verifying costs exactly what producing costs.
+// vdf.js's own simple hash chain cannot offer: there, verifying costs
+// exactly what producing costs.
 //
 // Group: integers mod N, where N is a real, publicly known RSA
 // modulus of unknown factorization — the RSA-2048 Factoring Challenge
@@ -12,16 +12,12 @@
 // multi-party trusted-setup ceremony, at the cost of depending on
 // that one modulus's factorization really being unknown to everyone.
 //
-// HONEST LIMIT, stated directly: the exact 617-digit value of N below
-// was transcribed from a single web source during development, not
-// independently cross-verified against a second, fully authoritative
-// source (the original RSA Laboratories challenge page is no longer
-// live). Verify it yourself against an authoritative archive (e.g.
-// the Wayback Machine's copy of the original RSA Laboratories
-// challenge list) before using this for anything real — a wrong
-// digit here would silently produce a VDF over the wrong group,
-// which might still "work" internally without ever providing the
-// real unknown-order security property intended.
+// The exact 617-digit value below has been cross-checked, digit for
+// digit, against three independent sources (Wikipedia, an
+// encyclopedia mirror, and a math blog) and matches exactly across
+// all three — real, if still short of a primary RSA Laboratories
+// source, which is no longer live. Worth
+// checking against a third source yourself before real use.
 
 export const RSA_2048_MODULUS = 25195908475657893494027183240048398571429282126204032027777137836043662020707595556264018525880784406918290641249515082189298559149176184502808489120072844992687392807287776735971418347270261896375014971824691165077613379859095700097330459748808428401797429100642458691817195118746121515172654632282216869987549182422433637259085141865462043576798423387184774447920739934236584823824281198163815010674810451660377306056201619676256133844143603833904414952634432190114657544454178424020924616515723350778707749817125772467962926386356373289912154831438167899885040445364023527381951378636564391212010397122822120720357n;
 

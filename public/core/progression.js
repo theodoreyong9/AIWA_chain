@@ -9,7 +9,15 @@ export function initialProgressionState() {
   return { domains: {}, rejections: [] };
 }
 
-export async function applyProgressionEvent(state, event) {
+// verifyFn defaults to the real, main-thread verifyVdfChain — every
+// existing call site, and this project's own Node-based test suite,
+// keeps working unchanged. A caller with access to a real worker
+// thread (app.js's boot(), catching up on a real, possibly large
+// backlog) can inject a worker-backed verifier instead, so that even
+// this one-time catch-up work never has to run on the same thread
+// that also needs to render and handle input — the identical real
+// reason the ongoing progression loop was already moved off it.
+export async function applyProgressionEvent(state, event, verifyFn = verifyVdfChain) {
   const payload = event.payload;
   if (!payload || payload.type !== 'progression') return state;
 
@@ -31,15 +39,15 @@ export async function applyProgressionEvent(state, event) {
   if (!Number.isInteger(vdfIterations) || vdfIterations < 1) return reject('vdfIterations must be a positive integer');
 
   const seed = vdfSeed(domain, current.vdfOutput ?? 'genesis');
-  if (!(await verifyVdfChain(seed, vdfIterations, vdfOutput))) {
+  if (!(await verifyFn(seed, vdfIterations, vdfOutput))) {
     return reject('VDF proof does not verify against the recomputed chain');
   }
 
   return { ...state, domains: { ...state.domains, [domain]: { epoch, lastId: event.id, vdfOutput } } };
 }
 
-export async function materializeProgression(orderedEvents) {
+export async function materializeProgression(orderedEvents, verifyFn = verifyVdfChain) {
   let state = initialProgressionState();
-  for (const event of orderedEvents) state = await applyProgressionEvent(state, event);
+  for (const event of orderedEvents) state = await applyProgressionEvent(state, event, verifyFn);
   return state;
 }

@@ -25,9 +25,6 @@ test('rejects zero total weight', () => {
 });
 
 test('THE REAL PROPERTY: a minority of weight cannot pull the result to an arbitrary value', () => {
-  // 3 honest estimates near 100, each weight 20 (total honest weight 60).
-  // 1 adversarial estimate at 999999, weight 39 — just under half of the
-  // combined total (99), matching the real security bound (alpha_A < 1/2).
   const honest = [{ value: 98, weight: 20 }, { value: 100, weight: 20 }, { value: 102, weight: 20 }];
   const adversarial = [{ value: 999999, weight: 39 }];
   const result = weightedMedian([...honest, ...adversarial]);
@@ -36,7 +33,7 @@ test('THE REAL PROPERTY: a minority of weight cannot pull the result to an arbit
 
 test('SECURITY: once adversarial weight crosses half, it DOES dominate — the real, documented boundary, not silently hidden', () => {
   const honest = [{ value: 100, weight: 40 }];
-  const adversarial = [{ value: 999999, weight: 61 }]; // now a real majority
+  const adversarial = [{ value: 999999, weight: 61 }];
   const result = weightedMedian([...honest, ...adversarial]);
   assert.equal(result, 999999, 'this is the real, honest boundary the design accepts — alpha_A >= 1/2 is explicitly out of scope, not silently protected against');
 });

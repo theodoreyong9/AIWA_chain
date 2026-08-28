@@ -38,12 +38,21 @@ export function verifyBurnProof(tx, { minLamports = 0 } = {}) {
   return { valid: true };
 }
 
+// Accumulates every real, valid burn from a domain — a domain that
+// commits additional real capital later must see its real, total
+// committed capital reflected, exactly like accrual.js's own `b`
+// already does. An earlier version rejected any burn after the
+// first outright, silently understating a domain's real weight in
+// Causal Tick (§13) even though its own accrual capital kept growing
+// from the identical real burns — a real, closed inconsistency, not
+// a hypothetical one. Each individual burn is still checked against
+// the churn cost curve at its own real slot — a real commitment made
+// later in protocol time must still meet whatever the curve requires
+// at that later time, never grandfathered in at the original
+// registration's own, possibly much lower, requirement.
 export function registerIdentityCost(state, { domain, tx, minLamports = 0, now = Date.now(), churnConfig } = {}) {
   if (state.usedSignatures[tx.signature]) {
     return { state, accepted: false, reason: `signature ${tx.signature} already used` };
-  }
-  if (state.registered[domain]) {
-    return { state, accepted: false, reason: `domain '${domain}' already registered` };
   }
 
   let effectiveMinLamports = minLamports;
@@ -55,9 +64,20 @@ export function registerIdentityCost(state, { domain, tx, minLamports = 0, now =
   const check = verifyBurnProof(tx, { minLamports: effectiveMinLamports });
   if (!check.valid) return { state, accepted: false, reason: check.reason };
 
+  const prior = state.registered[domain];
+  const totalBurnedLamports = (prior?.burnedLamports ?? 0) + tx.incineratorBalanceDeltaLamports;
   return {
     state: {
-      registered: { ...state.registered, [domain]: { domain, signature: tx.signature, burnedLamports: tx.incineratorBalanceDeltaLamports, registeredAt: now, slot: tx.slot ?? null } },
+      registered: {
+        ...state.registered,
+        [domain]: {
+          domain,
+          burnedLamports: totalBurnedLamports,
+          signature: tx.signature, // the most recent contributing signature — every real signature that ever contributed remains individually verifiable via usedSignatures
+          registeredAt: prior?.registeredAt ?? now, // when this domain FIRST proved identity cost — never moves on a later, additional burn
+          slot: prior?.slot ?? (tx.slot ?? null), // the same real, original registration slot
+        },
+      },
       usedSignatures: { ...state.usedSignatures, [tx.signature]: true },
     },
     accepted: true,

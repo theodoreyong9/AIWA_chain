@@ -1,9 +1,7 @@
 // Composes accrual.js and conservation.js into one materialized wallet
 // state. A 'claim' event debits the accrued balance AND creates the
 // matching spendable Conservation claim in the same pass — both
-// checked before either is applied, so they can never drift apart the
-// way two separately-materialized, cross-checked-after-the-fact views
-// could.
+// checked before either is applied, so they can never drift apart.
 //
 // 'transfer' and 'split' require a real Ed25519 signature — moving or
 // dividing a claim must prove control over it.
@@ -78,12 +76,12 @@ async function verifySplitAuthorization(event) {
   return (await deriveDomainId(fromHex(event.signerPubkey))) === event.owner;
 }
 
-export async function applyWalletEvent(rewardParams, state, event) {
+export async function applyWalletEvent(rewardParams, state, event, verifyFn) {
   const payload = event.payload;
   if (!payload || typeof payload.type !== 'string') return state;
 
   if (payload.type === 'progression' || payload.type === 'accrual') {
-    return { ...state, accrual: await applyAccrualEvent(rewardParams, state.accrual, event) };
+    return { ...state, accrual: await applyAccrualEvent(rewardParams, state.accrual, event, verifyFn) };
   }
 
   if (payload.type === 'claim') {
@@ -92,10 +90,10 @@ export async function applyWalletEvent(rewardParams, state, event) {
     if (typeof claimId !== 'string' || !claimId) return reject('missing claimId');
     if (state.conservation.claims[claimId]) return reject(`claim id already exists: ${claimId}`);
 
-    const newAccrual = await applyAccrualEvent(rewardParams, state.accrual, event);
+    const newAccrual = await applyAccrualEvent(rewardParams, state.accrual, event, verifyFn);
     const before = state.accrual.balances[domain] ?? 0n;
     const after = newAccrual.balances[domain] ?? 0n;
-    if (after === before) return { ...state, accrual: newAccrual }; // rejected by accrual itself — insufficient balance or malformed
+    if (after === before) return { ...state, accrual: newAccrual };
 
     const amount = toUnits(payload.amount);
     const conservation = issueClaim(state.conservation, { id: claimId, kind: 'AIWA', amount, owner: domain });
@@ -134,10 +132,10 @@ export async function applyWalletEvent(rewardParams, state, event) {
   return state;
 }
 
-export async function materializeWallet(rewardParams, orderedEvents, onProgress) {
+export async function materializeWallet(rewardParams, orderedEvents, onProgress, verifyFn) {
   let state = initialWalletState();
   for (let i = 0; i < orderedEvents.length; i++) {
-    state = await applyWalletEvent(rewardParams, state, orderedEvents[i]);
+    state = await applyWalletEvent(rewardParams, state, orderedEvents[i], verifyFn);
     if (onProgress && i % 20 === 0) onProgress(i + 1, orderedEvents.length);
   }
   if (onProgress) onProgress(orderedEvents.length, orderedEvents.length);
@@ -148,13 +146,6 @@ export function spendableClaims(state, domain) {
   return Object.values(state.conservation.claims).filter((c) => c.owner === domain && c.status === 'active');
 }
 
-// The one real, correct total: what is still growing but unclaimed
-// (claimableNow, over the real accrual position) plus what has
-// already been claimed into real, spendable Conservation claims.
-// state.accrual.balances[domain] itself is NOT part of this — once a
-// 'claim' event fires, wallet.js creates a real matching Conservation
-// claim for the identical amount, so accrual.js's own internal
-// balances field would double-count the same value if added here.
 export function totalBalance(rewardParams, state, domain) {
   const unclaimed = claimableNow(rewardParams, state.accrual, domain);
   const claimed = spendableClaims(state, domain).reduce((sum, c) => sum + c.amount, 0n);

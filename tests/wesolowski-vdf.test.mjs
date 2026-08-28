@@ -2,11 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { evaluate, prove, verify, RSA_2048_MODULUS } from '../public/core/wesolowski-vdf.js';
 
-// A small, known-composite test modulus — fast for correctness and
-// security tests, where "unknown order" isn't the property under
-// test (that only matters for real deployment against RSA_2048_MODULUS,
-// exercised separately below with a smaller, real iteration count).
-const TEST_N = 9241n * 9257n; // = 85,548,737 — small, real, known-factored, fine for algorithm-correctness tests
+const TEST_N = 9241n * 9257n;
 
 test('a real, honestly-computed VDF proof verifies', async () => {
   const x = 7n;
@@ -40,9 +36,8 @@ test('SECURITY: a fabricated y with no real computation behind it is rejected', 
 test('SECURITY: a proof computed for fewer real iterations than claimed is rejected', async () => {
   const x = 7n;
   const realY = evaluate(x, 300, TEST_N);
-  const shortcutY = evaluate(x, 250, TEST_N); // real, but for the wrong iteration count
+  const shortcutY = evaluate(x, 250, TEST_N);
   const shortcutProof = await prove(x, 250, shortcutY, TEST_N);
-  // Claiming T=300 but supplying the T=250 proof and output.
   assert.equal(await verify(x, 300, shortcutY, shortcutProof, TEST_N), false);
 });
 
@@ -60,7 +55,7 @@ test('SECURITY: a proof with a forged challenge prime l is rejected', async () =
   const T = 300;
   const y = evaluate(x, T, TEST_N);
   const proof = await prove(x, T, y, TEST_N);
-  const tampered = { ...proof, l: proof.l + 2n }; // a different (still real) prime, not the recomputed one
+  const tampered = { ...proof, l: proof.l + 2n };
   assert.equal(await verify(x, T, y, tampered, TEST_N), false);
 });
 
@@ -71,9 +66,6 @@ test('verify rejects a malformed proof shape without throwing', async () => {
 });
 
 test('THE REAL PROPERTY: verification time does not scale with iteration count, unlike evaluation time', async () => {
-  // Only measurable against the real, large modulus — a small test
-  // modulus makes every modular multiplication near-instant either
-  // way, masking the real asymmetry this test exists to demonstrate.
   const x = 7n;
   const smallT = 500;
   const largeT = 8000;
@@ -97,17 +89,13 @@ test('THE REAL PROPERTY: verification time does not scale with iteration count, 
   await verify(x, largeT, yLarge, proofLarge, RSA_2048_MODULUS);
   const verifyTimeLarge = performance.now() - verifyStartLarge;
 
-  // Evaluation time should scale roughly with T (16x more iterations).
   assert.ok(evalTimeLarge > evalTimeSmall * 5, `eval time should grow with T: small=${evalTimeSmall}ms large=${evalTimeLarge}ms`);
-  // Verification time should NOT scale anywhere near that — the real,
-  // load-bearing property of an asymmetric VDF, unlike progression.js's
-  // own simple hash chain.
   assert.ok(verifyTimeLarge < evalTimeLarge / 3, `verify must stay cheap even at large T: verify=${verifyTimeLarge}ms eval=${evalTimeLarge}ms`);
 });
 
 test('a real end-to-end round trip against the actual RSA-2048 modulus, at a small iteration count for test speed', async () => {
   const x = 7n;
-  const T = 50; // small on purpose — this modulus is 2048 bits, real squarings here are genuinely heavier than the small test modulus above
+  const T = 50;
   const y = evaluate(x, T, RSA_2048_MODULUS);
   const proof = await prove(x, T, y, RSA_2048_MODULUS);
   assert.equal(await verify(x, T, y, proof, RSA_2048_MODULUS), true);

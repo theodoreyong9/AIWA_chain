@@ -2,12 +2,13 @@
 // Each step depends on the output of the one before it — no shortcut,
 // regardless of parallel hardware. This bounds the RATE at which a
 // domain can advance its own progression; it does not bound calendar
-// time (see docs/YELLOWPAPER.md).
+// time, by design (see docs/YELLOWPAPER.md).
 //
 // Not an asymmetric VDF in the cryptographic sense (Wesolowski,
 // Pietrzak) — verifying costs exactly what producing costs, not
-// asymptotically less. What it does provide: production cannot be
-// parallelized or shortcut, with any amount of hardware.
+// asymptotically less. See wesolowski-vdf.js for that. What it does
+// provide: production cannot be parallelized or shortcut, with any
+// amount of hardware.
 
 async function sha256(bytes) {
   const digest = await crypto.subtle.digest('SHA-256', bytes);
@@ -24,7 +25,7 @@ function toHex(bytes) {
 // reload request on its own. Thousands of awaited microtasks back to
 // back can starve the main thread just as completely as a real
 // synchronous loop would, even though every individual step is
-// technically async. This is the real, concrete fix for that.
+// technically async.
 function yieldToMain() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }

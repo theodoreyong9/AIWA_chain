@@ -46,10 +46,29 @@ test('SECURITY: the same signature cannot back two different domains', () => {
   assert.equal(result.accepted, false);
 });
 
-test('a domain cannot register a second identity cost once it already has one', () => {
-  let { state } = registerIdentityCost(initialIdentityCostState(), { domain: 'alice', tx: tx() });
-  const result = registerIdentityCost(state, { domain: 'alice', tx: tx({ signature: 'sig2' }) });
-  assert.equal(result.accepted, false);
+test('THE REAL FIX: a second, real, valid burn from the same domain accumulates onto its real, total committed capital — never rejected outright', () => {
+  const first = registerIdentityCost(initialIdentityCostState(), { domain: 'alice', tx: tx({ incineratorBalanceDeltaLamports: 1000 }) });
+  assert.equal(first.accepted, true);
+  const second = registerIdentityCost(first.state, { domain: 'alice', tx: tx({ signature: 'sig2', incineratorBalanceDeltaLamports: 500 }) });
+  assert.equal(second.accepted, true, 'a real, later, additional burn from the same domain is a real, legitimate commitment, not a rejected duplicate');
+  assert.equal(second.state.registered.alice.burnedLamports, 1500, 'the real, total committed capital must reflect both real burns summed — matching accrual.js\'s own b, which already accumulates identically');
+});
+
+test('registeredAt and the original registration slot never move on a later, additional burn', () => {
+  const first = registerIdentityCost(initialIdentityCostState(), { domain: 'alice', tx: tx({ slot: 10 }), now: 1000 });
+  const second = registerIdentityCost(first.state, { domain: 'alice', tx: tx({ signature: 'sig2', slot: 999 }), now: 5000 });
+  assert.equal(second.state.registered.alice.registeredAt, 1000, 'the domain\'s own first real proof of identity cost stays the real reference point');
+  assert.equal(second.state.registered.alice.slot, 10);
+});
+
+test('SECURITY: a later, additional burn must independently satisfy the churn curve at its OWN real slot, never grandfathered at the original registration\'s lower requirement', () => {
+  const curve = linearCostCurve({ baseLamports: 100, lamportsPerSlot: 10 });
+  const churnConfig = { genesisSlot: 0, costCurve: curve };
+  const first = registerIdentityCost(initialIdentityCostState(), { domain: 'alice', tx: tx({ slot: 0, incineratorBalanceDeltaLamports: 100 }), churnConfig });
+  assert.equal(first.accepted, true);
+  // A later burn at slot 200 requires >= 100 + 200*10 = 2100 lamports on its OWN — a small, real amount is correctly rejected, even though the domain is already registered.
+  const second = registerIdentityCost(first.state, { domain: 'alice', tx: tx({ signature: 'sig2', slot: 200, incineratorBalanceDeltaLamports: 50 }), churnConfig });
+  assert.equal(second.accepted, false, 'a small, real burn at a later real slot must still meet the real, current curve requirement on its own');
 });
 
 test('hasIdentityCost is false for an unregistered domain', () => {

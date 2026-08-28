@@ -17,22 +17,15 @@ const DB_NAME = 'aiwa-chain-local';
 // processed, restored from a snapshot on boot. Never a position or
 // count in any particular topological ordering, which has no
 // guaranteed stability once a local DAG holds more than one domain's
-// events (see state-snapshot.js's own header).
+// events.
 let coveredEventIds = new Set();
-// Real wall-clock time since the last snapshot save — robust to
-// frequent reloads, unlike a pure event count, which is just an
-// in-memory variable that resets to zero on every single page load.
-// A short session that reloads often would otherwise never
-// accumulate enough events to ever trigger a save, letting real
-// catch-up backlog grow across many short sessions instead of being
-// bounded by one real time window.
 let lastSnapshotAt = 0;
 const SNAPSHOT_INTERVAL_MS = 5000;
 
 // The real, ongoing VDF computation runs on a dedicated worker thread
 // — see vdf-worker.js's own header for why. One worker, reused across
-// every epoch; a request/response pattern (rather than one-shot
-// worker-per-epoch) avoids real, repeated worker start-up cost.
+// every epoch; a request/response pattern avoids real, repeated
+// worker start-up cost.
 let vdfWorker = null;
 let requestCounter = 0;
 const pendingRequests = new Map();
@@ -41,11 +34,11 @@ function getVdfWorker() {
   if (!vdfWorker) {
     vdfWorker = new Worker(new URL('./vdf-worker.js', import.meta.url), { type: 'module' });
     vdfWorker.onmessage = (e) => {
-      const { requestId, vdfOutput } = e.data;
+      const { requestId } = e.data;
       const resolve = pendingRequests.get(requestId);
       if (resolve) {
         pendingRequests.delete(requestId);
-        resolve(vdfOutput);
+        resolve(e.data);
       }
     };
   }
@@ -56,8 +49,21 @@ function computeVdfOnWorker(domain, previousOutput, iterations) {
   const worker = getVdfWorker();
   const requestId = ++requestCounter;
   return new Promise((resolve) => {
-    pendingRequests.set(requestId, resolve);
-    worker.postMessage({ requestId, domain, previousOutput, iterations });
+    pendingRequests.set(requestId, (data) => resolve(data.vdfOutput));
+    worker.postMessage({ requestId, kind: 'compute', domain, previousOutput, iterations });
+  });
+}
+
+// A real verifyFn, injectable into progression.js's own applyProgressionEvent
+// (see that file's own header) — moves the one-time, potentially large
+// initial catch-up backlog's VDF verification off the main thread too,
+// the identical real reason the ongoing loop already runs there.
+function verifyVdfOnWorker(seed, iterations, output) {
+  const worker = getVdfWorker();
+  const requestId = ++requestCounter;
+  return new Promise((resolve) => {
+    pendingRequests.set(requestId, (data) => resolve(data.valid));
+    worker.postMessage({ requestId, kind: 'verify', seed, iterations, output });
   });
 }
 
@@ -66,7 +72,7 @@ function computeVdfOnWorker(domain, previousOutput, iterations) {
 // causal history, not just at the end). Everyday actions (a claim, a
 // send, a new epoch) use the cheap, real, incremental path instead —
 // see applyIncremental below.
-async function rematerialize() {
+export async function rematerialize() {
   const events = state.dag.topoOrder();
   state.wallet = await materializeWallet(REWARD_PARAMS, events);
   coveredEventIds = new Set(events.map((e) => e.id));
@@ -82,7 +88,7 @@ async function rematerialize() {
 // currently active" — never a reason on its own to redo wallet/mirror/
 // identity-cost materialization, which are the same regardless of
 // which identity happens to be connected right now.
-async function refreshCausalTick() {
+export async function refreshCausalTick() {
   const events = state.dag.topoOrder();
   state.causalTick = state.domainId ? await computeCausalTick(state.mirror, state.identityCost, events, state.domainId) : null;
 }
@@ -90,16 +96,16 @@ async function refreshCausalTick() {
 // Applies one real, new event directly to the already-materialized
 // state — the normal path for everyday actions. Never re-verifies
 // anything already covered.
-async function applyIncremental(id, parents, payload) {
+export async function applyIncremental(id, parents, payload) {
   state.wallet = await applyWalletEvent(REWARD_PARAMS, state.wallet, { id, parents, payload });
   coveredEventIds.add(id);
   notify();
   maybeSnapshot();
 }
 
-// Saves a real snapshot at most every 5 real seconds — bounded catch-up
-// backlog regardless of how many times the tab gets reloaded in
-// between, unlike a pure event counter that resets on every load.
+// Saves a real snapshot at most every 5 real seconds — bounded
+// catch-up backlog regardless of how many times the tab gets reloaded
+// in between, unlike a pure event counter that resets on every load.
 function maybeSnapshot() {
   const now = Date.now();
   if (now - lastSnapshotAt < SNAPSHOT_INTERVAL_MS) return;
@@ -183,7 +189,11 @@ async function boot() {
       const label = snapshot ? 'Catching up since last snapshot\u2026' : 'Verifying real, historical progression\u2026';
       showProgress(0, remaining.length, label);
       for (let i = 0; i < remaining.length; i++) {
-        base = await applyWalletEvent(REWARD_PARAMS, base, remaining[i]);
+        // The real VDF verification for any 'progression' events in
+        // this backlog runs on the same dedicated worker thread as
+        // the ongoing loop — a real, possibly large one-time catch-up
+        // must never compete with rendering or input handling either.
+        base = await applyWalletEvent(REWARD_PARAMS, base, remaining[i], verifyVdfOnWorker);
         coveredEventIds.add(remaining[i].id);
         if (i % 20 === 0) showProgress(i + 1, remaining.length, label);
       }
@@ -209,5 +219,3 @@ async function boot() {
 }
 
 boot();
-
-export { rematerialize, applyIncremental, refreshCausalTick };

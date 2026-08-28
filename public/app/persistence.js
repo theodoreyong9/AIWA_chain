@@ -50,11 +50,7 @@ export async function loadAllEvents(dbName) {
 // automatically persisted going forward. Uses loadTrusted() — real
 // hash recomputation for every single locally-generated event on
 // every page load is redundant work for content this exact domain
-// already verified once, at real creation time; it would otherwise
-// grow without bound the longer a domain runs. Ids are still recomputed
-// (via the normal addEvent()) for anything genuinely new or externally
-// received, going forward — this fast path is only for restoring this
-// domain's own already-trusted local history.
+// already verified once, at real creation time.
 export async function createPersistedDag(dbName, dag) {
   const stored = await loadAllEvents(dbName);
   const ordered = topologicalSortForReplay(stored);

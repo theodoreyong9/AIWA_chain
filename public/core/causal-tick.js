@@ -2,10 +2,7 @@
 // evidence is insufficient. "Local" and "cross-domain" are not two
 // separate mechanisms — the identical function, given more evidence
 // (a newly-imported domain's history, a newly-signed reception
-// commitment), simply produces a more refined result. There is no
-// second synchronization protocol for when a partition reconnects;
-// there is only this same function seeing more of what already
-// exists.
+// commitment), simply produces a more refined result.
 //
 // A domain's own progression epoch (progression.js) remains the real,
 // unconditional source of truth for its own accrual — bound by a real
@@ -14,14 +11,22 @@
 // committed capital (identity-cost.js), corroborate about a domain's
 // position.
 //
+// REPLAY GIVES ZERO ADDITIONAL INFLUENCE: each real observer
+// contributes exactly ONE estimate, at their own most-recent,
+// highest-resolving observation of the target domain — never one
+// estimate per historical reference. An observer who commits the
+// identical reception twice, or who has simply accumulated many old
+// commitments over time, must never see their real weight counted
+// more than once just by having said the same true thing more than
+// once. This mirrors Mirror's own reception-monotonicity philosophy:
+// only a domain's current, real state of knowledge matters.
+//
 // Hardware attestation (hardware-attestation.js) is fully OPTIONAL —
 // AIWA's evidence interface works with software primitives alone.
 // When present, it is reported as a SEPARATE, additional confidence
 // signal (hardwareBackedWeight, hardwareBackedObservers) — it never
 // gates participation, never scales weight, never becomes a required
-// input. A domain backed by zero hardware attestations produces an
-// identical Causal Tick value to one backed by many; only the
-// reported confidence signal differs.
+// input.
 
 import { deriveSourceEpochLookup } from './mirror.js';
 import { weightedMedian } from './weighted-median.js';
@@ -47,23 +52,23 @@ export async function computeCausalTick(mirrorState, identityCostState, orderedE
     const weight = identityCostState.registered[observerDomain]?.burnedLamports ?? 0;
     if (!(weight > 0)) continue; // no real committed capital — no real weight
 
-    let observerContributed = false;
+    // Real, current best knowledge only — the highest epoch this real
+    // observer has validly resolved for the target, across every
+    // commitment they've ever made. A real, single contribution, not
+    // one per historical mention.
+    let bestEpoch = null;
     for (const commitment of commitments) {
       for (const ref of commitment.receivedFrom) {
         if (ref.sourceDomain !== targetDomain) continue;
         const epoch = sourceEpochLookup(targetDomain, ref.eventId);
         if (epoch === null) continue; // a claimed reference that does not resolve to a real event — ignored, not trusted
-        estimates.push({ value: epoch, weight });
-        totalWeight += weight;
-        observerContributed = true;
+        if (bestEpoch === null || epoch > bestEpoch) bestEpoch = epoch;
       }
     }
 
-    if (observerContributed) {
-      // Reported, never consumed by the weighted median itself — an
-      // informational signal about how much of the corroborating
-      // weight also carries a stronger, optional independence
-      // assurance.
+    if (bestEpoch !== null) {
+      estimates.push({ value: bestEpoch, weight });
+      totalWeight += weight;
       const attestations = hardwareAttestations[observerDomain];
       if (attestations && (await isIndependenceAttested(attestations, observerDomain))) {
         hardwareBackedWeight += weight;
@@ -86,14 +91,6 @@ export async function computeCausalTick(mirrorState, identityCostState, orderedE
 }
 
 /**
- * The real security-relevant question: does a domain's own self-
- * reported epoch sit within a real, bounded distance of what weighted
- * external evidence corroborates? A large gap is a real, honest
- * signal to surface — never proof of dishonesty by itself (a domain
- * legitimately far ahead of its own, still-catching-up observers
- * looks identical to one that fabricated progression no one has
- * corroborated yet).
- *
  * @param {number} selfReportedEpoch
  * @param {Awaited<ReturnType<typeof computeCausalTick>>} causalTick
  * @param {number} tolerance

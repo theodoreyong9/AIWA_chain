@@ -18,8 +18,6 @@ function makeSigner() {
   return { seed, pubkeyBytes };
 }
 
-// Advances `domain` by `count` real progression epochs, continuing
-// from wherever its real chain currently is, read back from state.
 async function advanceEpochs(state, domain, count) {
   const current = state.accrual.progression.domains[domain] ?? { epoch: 0, vdfOutput: null, lastId: null };
   let epoch = current.epoch;
@@ -37,10 +35,6 @@ async function advanceEpochs(state, domain, count) {
   return state;
 }
 
-// Builds a domain with `epochs` real progression, a real committed
-// accrual, then enough further real epochs to make something real and
-// positive claimable — returns state and the id of the last event, for
-// real causal chaining by the caller.
 async function readyToClaimDomain(domain, epochs = 5, b = 10) {
   let state = await advanceEpochs(initialWalletState(), domain, epochs);
   const accrualId = crypto.randomUUID();
@@ -148,11 +142,6 @@ test('totalBalance sums unclaimed-but-growing plus already-claimed, with no doub
   const claimableBefore = claimableNow(rewardParams, state.accrual, 'alice');
   const claimAmount = fromUnits(claimableBefore);
   const s = await applyWalletEvent(rewardParams, state, { id: 'c1', parents: [], payload: { type: 'claim', domain: 'alice', claimId: 'claim1', amount: claimAmount } });
-  // Right after claiming everything currently claimable, the position's
-  // own clock has just reset — claimableNow at the SAME real epoch
-  // should be far smaller than what was just claimed, not the same
-  // amount again, so the total should be close to (not double) what
-  // was claimed.
   const total = totalBalance(rewardParams, s, 'alice');
   assert.ok(total >= toUnits(claimAmount), 'must be at least what was claimed');
   assert.ok(total < toUnits(claimAmount) * 2n, 'must never double-count the same already-claimed value');

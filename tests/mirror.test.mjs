@@ -49,7 +49,7 @@ test('SECURITY: a commitment with a forged signature is rejected', async () => {
   const attacker = makeSigner();
   const domain = await deriveDomainId(signer.pubkeyBytes);
   const message = new TextEncoder().encode(canonicalMessage({ domain, epoch: 1, kind: 'empty', receivedFrom: [] }));
-  const wrongSignature = ed25519.sign(message, attacker.seed); // signed by the wrong key
+  const wrongSignature = ed25519.sign(message, attacker.seed);
   const state = await applyMirrorEvent(initialMirrorState(), {
     id: 'e1', payload: { type: 'reception', domain, epoch: 1, kind: 'empty', receivedFrom: [], signature: toHex(wrongSignature), signerPubkey: toHex(signer.pubkeyBytes) },
   }, () => null);
@@ -89,7 +89,7 @@ test('SECURITY: reception monotonicity — claiming an earlier state than previo
   const p1 = await signCommitment(signer, { domain, epoch: 1, kind: 'full', receivedFrom: [{ sourceDomain: 'c', eventId: 'e-at-10' }] });
   state = await applyMirrorEvent(state, { id: 'ev1', payload: { type: 'reception', ...p1 } }, () => 10);
   const p2 = await signCommitment(signer, { domain, epoch: 2, kind: 'full', receivedFrom: [{ sourceDomain: 'c', eventId: 'e-at-5' }] });
-  state = await applyMirrorEvent(state, { id: 'ev2', payload: { type: 'reception', ...p2 } }, () => 5); // earlier than previously claimed
+  state = await applyMirrorEvent(state, { id: 'ev2', payload: { type: 'reception', ...p2 } }, () => 5);
   assert.equal(state.rejections.length, 1);
   assert.equal(state.maxSeenEpoch[domain].c, 10, 'the real, prior max must be preserved, not overwritten');
 });
@@ -113,7 +113,7 @@ test('monotonicity is tracked independently per source domain', async () => {
   const p1 = await signCommitment(signer, { domain, epoch: 1, kind: 'full', receivedFrom: [{ sourceDomain: 'c', eventId: 'c-at-10' }] });
   state = await applyMirrorEvent(state, { id: 'ev1', payload: { type: 'reception', ...p1 } }, () => 10);
   const p2 = await signCommitment(signer, { domain, epoch: 2, kind: 'full', receivedFrom: [{ sourceDomain: 'd', eventId: 'd-at-1' }] });
-  state = await applyMirrorEvent(state, { id: 'ev2', payload: { type: 'reception', ...p2 } }, () => 1); // progress on d, unrelated to c
+  state = await applyMirrorEvent(state, { id: 'ev2', payload: { type: 'reception', ...p2 } }, () => 1);
   assert.equal(state.rejections.length, 0);
 });
 

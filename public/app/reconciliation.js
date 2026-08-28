@@ -24,22 +24,14 @@ export function exportHistory(dag, domainId) {
   return events.length;
 }
 
-// Merges a real exported file's events into this local DAG — ids are
-// recomputed by addEvent() itself, never trusted from the file. This
-// is what makes real, distinct-domain Mirror observation possible at
-// all in a single-tab app: without another domain's real progression
-// events actually present locally, there is nothing real to observe
-// or sign a commitment about.
-export async function importHistory(dag, file) {
-  const text = await file.text();
-  const parsed = JSON.parse(text);
-  if (parsed.format !== 'aiwa-chain-export-v1' || !Array.isArray(parsed.events)) {
-    throw new Error('Not a recognized aiwa-chain export file.');
-  }
+// The real merge logic — parents-before-children replay, ids
+// recomputed by addEvent() itself, never trusted from the source.
+// Shared by both file-based import and live peer-to-peer sync
+// (p2p-connection.js), so a genuinely new transport is never a second,
+// separately-trusted path into the same real DAG.
+export async function mergeEvents(dag, rawEvents) {
   const before = dag.topoOrder().length;
-  // Real topological replay — parents before children — using the
-  // DAG's own real ids, not the file's claimed order.
-  const byId = new Map(parsed.events.map((e) => [e.id, e]));
+  const byId = new Map(rawEvents.map((e) => [e.id, e]));
   const visited = new Set();
   const ordered = [];
   function visit(id) {
@@ -50,7 +42,7 @@ export async function importHistory(dag, file) {
     for (const p of ev.parents) visit(p);
     ordered.push(ev);
   }
-  for (const ev of parsed.events) visit(ev.id);
+  for (const ev of rawEvents) visit(ev.id);
   for (const ev of ordered) {
     try { await dag.addEvent(ev.parents, ev.payload); } catch { /* an event whose parent this DAG never received — skipped, not crashed on */ }
   }
@@ -59,7 +51,19 @@ export async function importHistory(dag, file) {
   for (const ev of ordered) {
     if (ev.payload?.type === 'progression' && ev.payload?.domain) importedDomains.add(ev.payload.domain);
   }
-  return { imported: after - before, alreadyPresent: ordered.length - (after - before), sourceDomain: parsed.fromDomain ?? null, importedDomains };
+  return { imported: after - before, alreadyPresent: ordered.length - (after - before), importedDomains };
+}
+
+// Merges a real exported file's events into this local DAG — ids are
+// recomputed by addEvent() itself, never trusted from the file.
+export async function importHistory(dag, file) {
+  const text = await file.text();
+  const parsed = JSON.parse(text);
+  if (parsed.format !== 'aiwa-chain-export-v1' || !Array.isArray(parsed.events)) {
+    throw new Error('Not a recognized aiwa-chain export file.');
+  }
+  const result = await mergeEvents(dag, parsed.events);
+  return { ...result, sourceDomain: parsed.fromDomain ?? null };
 }
 
 function canonicalReceptionMessage({ domain, epoch, kind, receivedFrom }) {

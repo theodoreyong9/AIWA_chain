@@ -3,8 +3,18 @@ import { render, rematerialize } from './app.js';
 import { exportHistory, importHistory, buildReceptionCommitment } from './reconciliation.js';
 import { disconnect } from './identity.js';
 import { computeResidualDiversity, deriveSourceEpochLookup } from '../core/mirror.js';
+import { P2PConnection } from './p2p-connection.js';
 
 let lastMsg = null;
+
+// Real, live connection state — one connection at a time, kept
+// module-level so it survives re-renders.
+let p2pConnection = null;
+let p2pStatus = 'idle'; // 'idle' | 'awaiting-answer' | 'awaiting-completion' | 'open' | 'closed'
+let p2pOfferBlob = null;
+let p2pAnswerBlob = null;
+let p2pSyncedCount = 0;
+let p2pMsg = null;
 
 // Real domains this identity has actually, verifiably committed to
 // having observed — read from state.mirror's own real reception
@@ -15,13 +25,13 @@ let lastMsg = null;
 // "observed" external domain, which it never was. This is what the
 // entropic-space chart shows.
 function verifiedObservedDomains() {
-  const seen = new Map(); // domain -> { lastEventId, eventCount }
+  const seen = new Map();
   const lookup = deriveSourceEpochLookup(state.dag.topoOrder());
   const myCommitments = state.mirror?.commitments?.[state.domainId] ?? [];
   for (const commitment of myCommitments) {
     for (const ref of commitment.receivedFrom) {
       if (ref.sourceDomain === state.domainId) continue;
-      if (lookup(ref.sourceDomain, ref.eventId) === null) continue; // a stale or unresolved reference — not real, not counted
+      if (lookup(ref.sourceDomain, ref.eventId) === null) continue;
       const entry = seen.get(ref.sourceDomain) ?? { lastEventId: null, eventCount: 0 };
       entry.lastEventId = ref.eventId;
       entry.eventCount += 1;
@@ -33,10 +43,9 @@ function verifiedObservedDomains() {
 
 // Domains genuinely brought in via a real import (state.importedDomains,
 // populated only by reconciliation.js's own importHistory — never a
-// raw DAG scan, for the identical reason above), minus ones already
-// committed. This is the "you could commit to these" list.
+// raw DAG scan), minus ones already committed. This is the "you could
+// commit to these" list.
 function pendingImportDomains() {
-  const lookup = deriveSourceEpochLookup(state.dag.topoOrder());
   const alreadyCommitted = verifiedObservedDomains();
   const pending = new Map();
   for (const domainId of state.importedDomains) {
@@ -49,12 +58,6 @@ function pendingImportDomains() {
   return pending;
 }
 
-// A real, deterministic angle from a stable hash of the domain id —
-// spreads observed domains around visually; carries no meaning of its
-// own beyond avoiding overlap. Distance from center is the one real,
-// computed value: how much this domain actually knows about them,
-// via real corroboration weight from causal-tick.js — never fake
-// geography, exactly the point.
 function angleFor(domainId) {
   let h = 0;
   for (const ch of domainId) h = (h * 31 + ch.charCodeAt(0)) % 360;
@@ -66,13 +69,11 @@ function entropicSpaceSvg(domains) {
   const center = size / 2;
   const maxRadius = center - 40;
   if (domains.size === 0) {
-    return `<div class="empty-state" style="padding:30px 10px"><div class="glyph">\u25CB</div>No domains observed yet \u2014 import a real history file to populate this.</div>`;
+    return `<div class="empty-state" style="padding:30px 10px"><div class="glyph">\u25CB</div>No domains observed yet \u2014 import a real history file, or connect live, to populate this.</div>`;
   }
   const maxCount = Math.max(...[...domains.values()].map((d) => d.eventCount));
   const nodes = [...domains.entries()].map(([domainId, info]) => {
     const angle = angleFor(domainId);
-    // More real, known events from this domain -> closer (smaller radius).
-    // A domain barely known sits near the edge.
     const knownFraction = info.eventCount / maxCount;
     const radius = maxRadius * (1 - knownFraction * 0.75);
     const x = center + radius * Math.cos(angle);
@@ -92,6 +93,57 @@ function entropicSpaceSvg(domains) {
       ${points}
     </svg>
   `;
+}
+
+function p2pStatusHtml() {
+  if (p2pStatus === 'open') {
+    return `
+      <div class="status-line"><span class="status-dot continuous"></span>Connected \u2014 syncing live</div>
+      <p class="hint">${p2pSyncedCount} real event${p2pSyncedCount === 1 ? '' : 's'} synced automatically since connecting.</p>
+      <div class="btn-row"><button class="ghost" id="p2p-close-btn">Disconnect</button></div>
+    `;
+  }
+  if (p2pStatus === 'awaiting-answer') {
+    return `
+      <p class="hint">Send this real connection offer to the other person, then paste their real answer below.</p>
+      <textarea id="p2p-offer-display" readonly style="min-height:70px; font-size:10px">${p2pOfferBlob}</textarea>
+      <div class="btn-row"><button id="p2p-copy-offer">Copy</button></div>
+      <label class="field-label" style="margin-top:14px">Their answer</label>
+      <textarea id="p2p-answer-input" placeholder="paste their real answer blob here" style="min-height:70px; font-size:10px"></textarea>
+      <div class="btn-row"><button class="primary" id="p2p-complete-btn">Complete connection</button><button class="ghost" id="p2p-cancel-btn">Cancel</button></div>
+      <div id="p2p-msg">${p2pMsg ?? ''}</div>
+    `;
+  }
+  if (p2pStatus === 'awaiting-completion') {
+    return `
+      <p class="hint">Send this real answer back to whoever sent you the offer. The connection completes on their side.</p>
+      <textarea id="p2p-answer-display" readonly style="min-height:70px; font-size:10px">${p2pAnswerBlob}</textarea>
+      <div class="btn-row"><button id="p2p-copy-answer">Copy</button><button class="ghost" id="p2p-cancel-btn">Cancel</button></div>
+    `;
+  }
+  return `
+    <div class="btn-row"><button class="primary" id="p2p-start-btn">Start a connection</button></div>
+    <label class="field-label" style="margin-top:14px">Or accept someone else's offer</label>
+    <textarea id="p2p-offer-input" placeholder="paste a real offer blob here" style="min-height:70px; font-size:10px"></textarea>
+    <div class="btn-row"><button id="p2p-accept-btn">Accept</button></div>
+    <div id="p2p-msg">${p2pMsg ?? ''}</div>
+  `;
+}
+
+function startP2PConnection() {
+  p2pConnection = new P2PConnection(state.dag, state.domainId, {
+    onStatusChange: (status) => {
+      if (status === 'open') { p2pStatus = 'open'; p2pSyncedCount = 0; }
+      else if (status === 'closed') { p2pStatus = 'idle'; p2pConnection = null; }
+      render();
+    },
+    onSyncEvent: async (kind, result) => {
+      p2pSyncedCount += result.imported;
+      if (result.imported > 0) await rematerialize();
+      render();
+    },
+  });
+  return p2pConnection;
 }
 
 export function renderMirror(root) {
@@ -128,7 +180,7 @@ export function renderMirror(root) {
 
     <div class="card">
       <div class="card-title">Entropic space</div>
-      <p class="hint">Not geography \u2014 distance here is how little this domain actually knows about another, computed from real, imported history. Never a claim about where anything physically is.</p>
+      <p class="hint">Not geography \u2014 distance here is how little this domain actually knows about another, computed from real, imported or synced history. Never a claim about where anything physically is.</p>
       ${(() => {
         const diversity = computeResidualDiversity(state.mirror, state.domainId);
         return diversity.distinctSources > 0
@@ -139,8 +191,14 @@ export function renderMirror(root) {
     </div>
 
     <div class="card">
-      <div class="card-title">Reconciliation</div>
-      <p class="hint">The one real channel this app has for another domain's history to ever reach yours \u2014 no live peer-to-peer transport exists in this scope. Carried by hand, like a physically transported drive.</p>
+      <div class="card-title">Live connection</div>
+      <p class="hint">A real, direct WebRTC connection \u2014 no server in between, nowhere for one to run on a static site. Bootstrapping still needs one real blob of text moved by hand between two people \u2014 once that's done, every event from either side syncs live from there on, no more manual exports needed.</p>
+      ${p2pStatusHtml()}
+    </div>
+
+    <div class="card">
+      <div class="card-title">Reconciliation by file</div>
+      <p class="hint">The fallback when a live connection isn't possible \u2014 carried by hand, like a physically transported drive.</p>
       <div class="btn-row"><button id="export-btn">Export your history</button></div>
       <label class="field-label" style="margin-top:14px">Import a real history file</label>
       <input type="file" id="import-file" accept="application/json" />
@@ -150,7 +208,7 @@ export function renderMirror(root) {
 
     <div class="card">
       <div class="card-title">Imported, not yet committed (${pendingDomains.size})</div>
-      <p class="hint">Real history now present locally from an import \u2014 committing signs a real, verifiable statement that you've actually seen it.</p>
+      <p class="hint">Real history now present locally from an import or a live sync \u2014 committing signs a real, verifiable statement that you've actually seen it.</p>
       ${pendingDomains.size === 0 ? '<div class="hint">None yet.</div>' : [...pendingDomains.entries()].map(([d, info]) => `
         <div class="list-row">
           <div style="flex:1"><div class="mono-id">${short(d, 16)}</div><div class="hint">${info.eventCount} real event${info.eventCount === 1 ? '' : 's'} known</div></div>
@@ -166,6 +224,59 @@ export function renderMirror(root) {
     if (!confirm('Disconnect from this identity? Your real history stays saved on this device (IndexedDB) and can be restored with your secret key \u2014 this only stops acting as it right now.')) return;
     disconnect();
     render();
+  });
+
+  const startBtn = root.querySelector('#p2p-start-btn');
+  if (startBtn) startBtn.addEventListener('click', async () => {
+    const msgEl = root.querySelector('#p2p-msg');
+    try {
+      const conn = startP2PConnection();
+      p2pOfferBlob = await conn.createOffer();
+      p2pStatus = 'awaiting-answer';
+      render();
+    } catch (e) {
+      if (msgEl) msgEl.innerHTML = `<div class="msg error">${e.message}</div>`;
+    }
+  });
+  const acceptBtn = root.querySelector('#p2p-accept-btn');
+  if (acceptBtn) acceptBtn.addEventListener('click', async () => {
+    const msgEl = root.querySelector('#p2p-msg');
+    const offerBlob = root.querySelector('#p2p-offer-input').value.trim();
+    if (!offerBlob) { msgEl.innerHTML = `<div class="msg error">Paste a real offer first.</div>`; return; }
+    try {
+      const conn = startP2PConnection();
+      p2pAnswerBlob = await conn.acceptOfferAndCreateAnswer(offerBlob);
+      p2pStatus = 'awaiting-completion';
+      render();
+    } catch (e) {
+      msgEl.innerHTML = `<div class="msg error">${e.message}</div>`;
+    }
+  });
+  const completeBtn = root.querySelector('#p2p-complete-btn');
+  if (completeBtn) completeBtn.addEventListener('click', async () => {
+    const msgEl = root.querySelector('#p2p-msg');
+    const answerBlob = root.querySelector('#p2p-answer-input').value.trim();
+    if (!answerBlob) { msgEl.innerHTML = `<div class="msg error">Paste their real answer first.</div>`; return; }
+    try {
+      await p2pConnection.completeWithAnswer(answerBlob);
+    } catch (e) {
+      msgEl.innerHTML = `<div class="msg error">${e.message}</div>`;
+    }
+  });
+  const copyOfferBtn = root.querySelector('#p2p-copy-offer');
+  if (copyOfferBtn) copyOfferBtn.addEventListener('click', () => navigator.clipboard?.writeText(p2pOfferBlob));
+  const copyAnswerBtn = root.querySelector('#p2p-copy-answer');
+  if (copyAnswerBtn) copyAnswerBtn.addEventListener('click', () => navigator.clipboard?.writeText(p2pAnswerBlob));
+  const cancelBtn = root.querySelector('#p2p-cancel-btn');
+  if (cancelBtn) cancelBtn.addEventListener('click', () => {
+    if (p2pConnection) p2pConnection.close();
+    p2pStatus = 'idle';
+    p2pConnection = null;
+    render();
+  });
+  const closeBtn = root.querySelector('#p2p-close-btn');
+  if (closeBtn) closeBtn.addEventListener('click', () => {
+    if (p2pConnection) p2pConnection.close();
   });
 
   root.querySelector('#export-btn').addEventListener('click', () => {

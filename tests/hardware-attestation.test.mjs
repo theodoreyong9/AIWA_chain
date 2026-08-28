@@ -46,7 +46,6 @@ test('SECURITY: a forged issuance (wrong origin signature) is rejected', async (
   const attacker = makeKeypair();
   const realOriginDomain = await deriveDomainId(realOrigin.publicKey.toBytes());
   const root = makeSigner();
-  // Attacker signs the issuance instead of the real origin.
   const forgedIssuance = await issueHardwareRoot(attacker, realOriginDomain, root.pubkeyBytes);
   const binding = await bindHardwareRoot(root.seed, root.pubkeyBytes, 'target-domain');
   assert.equal(await verifyHardwareAttestation({ issuance: forgedIssuance, binding }, 'target-domain'), false);
@@ -58,7 +57,6 @@ test('SECURITY: a forged binding (wrong hardware root signature) is rejected', a
   const root = makeSigner();
   const attacker = makeSigner();
   const issuance = await issueHardwareRoot(origin, originDomain, root.pubkeyBytes);
-  // Attacker signs the binding instead of the real hardware root.
   const forgedBinding = await bindHardwareRoot(attacker.seed, root.pubkeyBytes, 'target-domain');
   assert.equal(await verifyHardwareAttestation({ issuance, binding: forgedBinding }, 'target-domain'), false);
 });
@@ -84,7 +82,7 @@ test('SECURITY: the same physical hardware root re-attested twice still counts o
   const root = makeSigner();
   const issuance = await issueHardwareRoot(origin, originDomain, root.pubkeyBytes);
   const bindingA = await bindHardwareRoot(root.seed, root.pubkeyBytes, 'target-domain', { boundAt: 1 });
-  const bindingB = await bindHardwareRoot(root.seed, root.pubkeyBytes, 'target-domain', { boundAt: 2 }); // same root, re-bound
+  const bindingB = await bindHardwareRoot(root.seed, root.pubkeyBytes, 'target-domain', { boundAt: 2 });
   const result = await isIndependenceAttested([{ issuance, binding: bindingA }, { issuance, binding: bindingB }], 'target-domain');
   assert.equal(result, false, 'the same hardware root counted twice must never satisfy a real minimum of two DISTINCT roots');
 });
@@ -103,6 +101,6 @@ test('SECURITY: mismatched hardware root pubkeys between issuance and binding ar
   const rootA = makeSigner();
   const rootB = makeSigner();
   const issuance = await issueHardwareRoot(origin, originDomain, rootA.pubkeyBytes);
-  const binding = await bindHardwareRoot(rootB.seed, rootB.pubkeyBytes, 'target-domain'); // a different root's own binding
+  const binding = await bindHardwareRoot(rootB.seed, rootB.pubkeyBytes, 'target-domain');
   assert.equal(await verifyHardwareAttestation({ issuance, binding }, 'target-domain'), false);
 });

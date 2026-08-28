@@ -1,6 +1,6 @@
 import { state, short, REWARD_PARAMS } from './state.js';
 import { render, applyIncremental } from './app.js';
-import { activateWithNewKeypair, activateWithSecretKeyBytes, activateWithPassphrase, hasSavedKey, saveCurrentKey, unlockSavedKey, clearSavedKey, disconnect } from './identity.js';
+import { activateWithNewKeypair, activateWithSecretKeyBytes, activateWithPassphrase, activateWithBip39Mnemonic, hasSavedKey, saveCurrentKey, unlockSavedKey, clearSavedKey, disconnect } from './identity.js';
 import { claimableNow } from '../core/accrual.js';
 import { spendableClaims, totalBalance, buildSignedTransferEvent, buildSignedSplitEvent } from '../core/wallet.js';
 import { format as formatAiwaAmount, toUnits, fromUnits } from '../core/units.js';
@@ -8,7 +8,6 @@ import { checkCausalConsistency } from '../core/causal-tick.js';
 import { computeResidualDiversity } from '../core/mirror.js';
 
 let lastMsg = null;
-let secretKeyRevealed = null;
 
 function noIdentity(root) {
   root.innerHTML = `
@@ -30,10 +29,23 @@ function noIdentity(root) {
     </div>` : ''}
     <div class="card">
       <div class="card-title">Open with a passphrase</div>
-      <p class="hint">The same real identity, anywhere \u2014 the identical passphrase always derives the identical keypair, on any device, with nothing else to carry. A weak passphrase is exactly as unsafe as a weak private key.</p>
-      <input type="password" id="passphrase-input" placeholder="a real passphrase, the more words the better" />
+      <p class="hint">The same real identity, anywhere \u2014 the identical passphrase always derives the identical keypair, on any device, with nothing else to carry. A weak passphrase is exactly as unsafe as a weak private key. <strong style="color:var(--amber)">This is not BIP39</strong> \u2014 it uses a real derivation specific to this app, not the standard real Solana wallets use. If you have an existing Solana wallet's real seed phrase, use "Import a real Solana wallet" below instead \u2014 typing it here opens a real, but different and unrelated, identity.</p>
+      <div style="display:flex; gap:6px">
+        <input type="password" id="passphrase-input" placeholder="a real passphrase, the more words the better" style="flex:1" />
+        <button type="button" class="ghost" id="passphrase-toggle" style="padding:0 12px">Show</button>
+      </div>
       <div class="btn-row"><button class="primary" id="passphrase-btn">Open</button></div>
       <div id="passphrase-msg"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Import a real Solana wallet</div>
+      <p class="hint">A real, standard BIP39 seed phrase \u2014 the identical derivation Phantom, Solflare, and the Solana CLI use, at the identical standard path. Your existing wallet's real address opens here too, with the same real funds and history it already has.</p>
+      <div style="display:flex; gap:6px">
+        <input type="password" id="bip39-input" placeholder="your real 12 or 24-word seed phrase" style="flex:1" />
+        <button type="button" class="ghost" id="bip39-toggle" style="padding:0 12px">Show</button>
+      </div>
+      <div class="btn-row"><button class="primary" id="bip39-btn">Import</button></div>
+      <div id="bip39-msg"></div>
     </div>
     <div class="card">
       <div class="card-title">Or restore an existing key</div>
@@ -62,11 +74,30 @@ function noIdentity(root) {
     try { await unlockSavedKey(root.querySelector('#unlock-pw').value); render(); }
     catch (e) { msgEl.innerHTML = `<div class="msg error">${e.message}</div>`; }
   });
+  root.querySelector('#passphrase-toggle').addEventListener('click', (e) => {
+    const input = root.querySelector('#passphrase-input');
+    const showing = input.type === 'text';
+    input.type = showing ? 'password' : 'text';
+    e.currentTarget.textContent = showing ? 'Show' : 'Hide';
+  });
   root.querySelector('#passphrase-btn').addEventListener('click', async () => {
     const msgEl = root.querySelector('#passphrase-msg');
     const passphrase = root.querySelector('#passphrase-input').value;
     if (!passphrase) { msgEl.innerHTML = `<div class="msg error">Enter a passphrase.</div>`; return; }
     try { await activateWithPassphrase(passphrase); render(); }
+    catch (e) { msgEl.innerHTML = `<div class="msg error">${e.message}</div>`; }
+  });
+  root.querySelector('#bip39-toggle').addEventListener('click', (e) => {
+    const input = root.querySelector('#bip39-input');
+    const showing = input.type === 'text';
+    input.type = showing ? 'password' : 'text';
+    e.currentTarget.textContent = showing ? 'Show' : 'Hide';
+  });
+  root.querySelector('#bip39-btn').addEventListener('click', async () => {
+    const msgEl = root.querySelector('#bip39-msg');
+    const mnemonic = root.querySelector('#bip39-input').value;
+    if (!mnemonic) { msgEl.innerHTML = `<div class="msg error">Enter your real seed phrase.</div>`; return; }
+    try { await activateWithBip39Mnemonic(mnemonic); render(); }
     catch (e) { msgEl.innerHTML = `<div class="msg error">${e.message}</div>`; }
   });
   const forgetBtn = root.querySelector('#forget');
@@ -106,7 +137,7 @@ function trajectorySvg() {
 
   const points = relevant.map((e, i) => {
     const x = 30 + i * step;
-    const wobble = (i % 3 === 1) ? -14 : (i % 3 === 2) ? 14 : 0; // a real, slight organic variation — never a false-precision timeline
+    const wobble = (i % 3 === 1) ? -14 : (i % 3 === 2) ? 14 : 0;
     const y = midY + wobble;
     return { x, y, style: styleFor(e.payload) };
   });
@@ -130,10 +161,10 @@ function activeContinuum(root) {
   const spendable = claims.reduce((s, c) => s + c.amount, 0n);
   const total = totalBalance(REWARD_PARAMS, state.wallet, state.domainId);
   const position = state.wallet.accrual.positions[state.domainId];
-  const selfReportedEpoch = state.wallet.accrual.progression.domains[state.domainId]?.epoch ?? 0;
-  const consistency = checkCausalConsistency(selfReportedEpoch, state.causalTick, 3);
   const recentTick = Date.now() - state.lastEpochAt < 3000;
   const diversity = computeResidualDiversity(state.mirror, state.domainId);
+  const selfReportedEpoch = state.wallet.accrual.progression.domains[state.domainId]?.epoch ?? 0;
+  const consistency = checkCausalConsistency(selfReportedEpoch, state.causalTick, 3);
 
   root.innerHTML = `
     <div class="top-bar">
@@ -156,6 +187,7 @@ function activeContinuum(root) {
         <span class="status-dot ${recentTick ? 'continuous' : 'partitioned'}"></span>
         ${recentTick ? 'continuous' : 'idle \u2014 no recent progression'}
       </div>
+      <p class="hint" style="margin-top:14px; max-width:340px; margin-left:auto; margin-right:auto">Your own progression needs no connection at all, ever \u2014 it runs anywhere, forever, alone if it has to. Reconciling with another domain needs only some way to move real bytes between you \u2014 never Earth's own network specifically, never any one particular service. Anywhere a real message could physically arrive is enough.</p>
     </div>
 
     <div class="card">
@@ -234,9 +266,6 @@ function activeContinuum(root) {
     const parents = [state.lastEventId];
     const newId = await state.dag.addEvent(parents, payload);
     state.lastEventId = newId;
-    // A real, incremental update — apply just this one new event,
-    // never a full re-fold and re-verification of the whole history
-    // for a single user action.
     await applyIncremental(newId, parents, payload);
     render();
   });
@@ -268,9 +297,6 @@ async function doSend(root, claims, accruedUnclaimed) {
   const exact = claims.find((c) => c.amount === amount);
   const covering = claims.filter((c) => c.amount > amount).sort((a, b) => (a.amount < b.amount ? -1 : 1))[0];
 
-  // A real, incremental update throughout — each event applied
-  // directly to the already-materialized state as it's posted, never
-  // a full re-fold of the whole history for a single user action.
   try {
     let claimIdToSend;
     if (exact) {
