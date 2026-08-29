@@ -4,6 +4,17 @@ import { exportHistory, importHistory, buildReceptionCommitment } from './reconc
 import { disconnect } from './identity.js';
 import { computeResidualDiversity, deriveSourceEpochLookup } from '../core/mirror.js';
 import { P2PConnection } from './p2p-connection.js';
+import { TrysteroConnection } from './trystero-connection.js';
+
+const PUBLIC_LOBBY_ROOM = 'aiwa-chain-public-lobby-v1';
+
+// A real, deterministic room id both sides compute independently from
+// the same two real domain ids — sorted first so it never matters
+// who initiates, the identical string results either way, with
+// nothing to exchange by hand.
+function roomIdForKnownDomain(domainA, domainB) {
+  return [domainA, domainB].sort().join('--');
+}
 
 let lastMsg = null;
 
@@ -16,6 +27,13 @@ let p2pAnswerBlob = null;
 let p2pSyncedCount = 0;
 let p2pMsg = null;
 let pendingIncomingOffer = null; // a real offer blob arrived via a scanned QR's own URL, ready to pre-fill
+
+// A real, separate, additional transport — never touches p2pConnection above.
+let trysteroConnection = null;
+let trysteroStatus = 'idle'; // 'idle' | 'joining' | 'joined'
+let trysteroSyncedCount = 0;
+let trysteroKnownDomainInput = '';
+let trysteroMsg = null;
 
 // Called once, right after boot, if a real offer blob arrived via a
 // scanned QR code's own URL — switches to Mirror and pre-fills the
@@ -164,6 +182,43 @@ function p2pStatusHtml() {
   `;
 }
 
+// A real, additional, optional transport — automatic discovery via
+// Trystero (real Nostr relays by default). Never required; the manual
+// flow above always remains available for anyone who'd rather not
+// touch a real, third-party relay at all, even just for discovery.
+function trysteroStatusHtml() {
+  if (trysteroStatus === 'joined') {
+    const peerCount = trysteroConnection?.peerIds().length ?? 0;
+    return `
+      <div class="status-line"><span class="status-dot continuous"></span>${peerCount} real peer${peerCount === 1 ? '' : 's'} connected, syncing live</div>
+      <p class="hint">${trysteroSyncedCount} real event${trysteroSyncedCount === 1 ? '' : 's'} synced automatically since joining.</p>
+      <div class="btn-row"><button class="ghost" id="trystero-leave-btn">Leave</button></div>
+    `;
+  }
+  return `
+    <p class="hint">No manual exchange at all \u2014 a real, public relay (Nostr by default) automatically matches you with anyone else joining the identical room, right now. The relay sees only that this device is looking for peers in this room; real event data never touches it, only the initial handshake does.</p>
+    <div class="btn-row"><button class="primary" id="trystero-lobby-btn" ${trysteroStatus === 'joining' ? 'disabled' : ''}>Join the public lobby</button></div>
+    <label class="field-label" style="margin-top:14px">Or reconnect with a specific domain you already know</label>
+    <input type="text" id="trystero-known-domain" placeholder="their real domain id" value="${trysteroKnownDomainInput}" />
+    <div class="btn-row"><button id="trystero-known-btn" ${trysteroStatus === 'joining' ? 'disabled' : ''}>Join</button></div>
+    <p class="hint">Only works if they join the identical room at roughly the same real time \u2014 both sides compute it independently from your two real domain ids, nothing to send each other first.</p>
+    <div id="trystero-msg">${trysteroMsg ?? ''}</div>
+  `;
+}
+
+function startTrysteroConnection(roomId) {
+  trysteroConnection = new TrysteroConnection(state.dag, roomId, {
+    onPeerConnected: () => { render(); },
+    onPeerDisconnected: () => { render(); },
+    onSyncEvent: async (peerId, kind, result) => {
+      trysteroSyncedCount += result.imported;
+      if (result.imported > 0) await rematerialize();
+      render();
+    },
+  });
+  return trysteroConnection;
+}
+
 function startP2PConnection() {
   p2pConnection = new P2PConnection(state.dag, state.domainId, {
     onStatusChange: (status) => {
@@ -238,9 +293,14 @@ export function renderMirror(root) {
     </div>
 
     <div class="card">
-      <div class="card-title">Live connection</div>
-      <p class="hint">The channel is temporary; what moves through it isn't. Anything received here is verified and saved locally, for good \u2014 closing this tab never erases it. What ends when a tab closes is only this specific live link, exactly like a real interplanetary link goes quiet during a real blackout: reconnecting later means re-establishing contact, never losing what each side already knew before. There's no directory or discovery yet \u2014 for now, joining the wider mesh means someone already on it invites you in, and if they're simultaneously connected to others, you get their real-time updates too, transitively, for as long as all three stay connected.</p>
+      <div class="card-title">Live connection (manual)</div>
+      <p class="hint">The channel is temporary; what moves through it isn't. Anything received here is verified and saved locally, for good \u2014 closing this tab never erases it. What ends when a tab closes is only this specific live link, exactly like a real interplanetary link goes quiet during a real blackout: reconnecting later means re-establishing contact, never losing what each side already knew before. No third party involved at all, not even for discovery \u2014 you exchange the connection text yourselves, by hand.</p>
       ${p2pStatusHtml()}
+    </div>
+
+    <div class="card">
+      <div class="card-title">Automatic discovery (Nostr)</div>
+      ${trysteroStatusHtml()}
     </div>
 
     <div class="card">
@@ -325,6 +385,51 @@ export function renderMirror(root) {
   const closeBtn = root.querySelector('#p2p-close-btn');
   if (closeBtn) closeBtn.addEventListener('click', () => {
     if (p2pConnection) p2pConnection.close();
+  });
+
+  const lobbyBtn = root.querySelector('#trystero-lobby-btn');
+  if (lobbyBtn) lobbyBtn.addEventListener('click', async () => {
+    const msgEl = root.querySelector('#trystero-msg');
+    trysteroStatus = 'joining';
+    render();
+    try {
+      await startTrysteroConnection(PUBLIC_LOBBY_ROOM).join();
+      trysteroStatus = 'joined';
+      trysteroSyncedCount = 0;
+      render();
+    } catch (e) {
+      trysteroStatus = 'idle';
+      if (msgEl) msgEl.innerHTML = `<div class="msg error">${e.message}</div>`;
+      else render();
+    }
+  });
+  const knownInput = root.querySelector('#trystero-known-domain');
+  if (knownInput) knownInput.addEventListener('input', (e) => { trysteroKnownDomainInput = e.target.value; });
+  const knownBtn = root.querySelector('#trystero-known-btn');
+  if (knownBtn) knownBtn.addEventListener('click', async () => {
+    const msgEl = root.querySelector('#trystero-msg');
+    const otherDomain = trysteroKnownDomainInput.trim();
+    if (!otherDomain) { if (msgEl) msgEl.innerHTML = `<div class="msg error">Enter their real domain id.</div>`; return; }
+    trysteroStatus = 'joining';
+    render();
+    try {
+      const roomId = roomIdForKnownDomain(state.domainId, otherDomain);
+      await startTrysteroConnection(roomId).join();
+      trysteroStatus = 'joined';
+      trysteroSyncedCount = 0;
+      render();
+    } catch (e) {
+      trysteroStatus = 'idle';
+      if (msgEl) msgEl.innerHTML = `<div class="msg error">${e.message}</div>`;
+      else render();
+    }
+  });
+  const trysteroLeaveBtn = root.querySelector('#trystero-leave-btn');
+  if (trysteroLeaveBtn) trysteroLeaveBtn.addEventListener('click', () => {
+    if (trysteroConnection) trysteroConnection.leave();
+    trysteroConnection = null;
+    trysteroStatus = 'idle';
+    render();
   });
 
   root.querySelector('#export-btn').addEventListener('click', () => {

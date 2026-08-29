@@ -2,15 +2,15 @@
 // APIs, no external signaling server (this is a static site; there is
 // nowhere for one to run), no external library. Bootstrapping still
 // needs some real channel for the first offer/answer exchange — see
-// p2p-signaling.js's own header for why that stays manual.
+// p2p-signaling.js's own header for why that stays manual (or use
+// trystero-connection.js's own automatic discovery instead, an
+// additional transport, never a replacement of this one).
 //
-// Once genuinely connected, every event this domain has (or later
-// creates) is real, automatically shared with the peer — the data
-// channel replaces repeated manual file exports, but merging received
-// events reuses reconciliation.js's own real mergeEvents(), the
-// identical verification a file import already goes through. A live
-// channel is a faster way for events to arrive; it is never a reason
-// to trust them more.
+// The real synchronization behavior once connected — full-sync, live
+// relay, real verification on receipt — lives in sync-protocol.js,
+// shared with every other real transport this project supports. This
+// file's own job is narrower: get one real, open channel between two
+// real devices, however manually that has to happen here.
 //
 // HONEST LIMIT: this file cannot be exercised by this project's own
 // Node-based test suite — RTCPeerConnection has no real equivalent
@@ -19,7 +19,7 @@
 // same claim as verified working end to end in two real browsers.
 
 import { encodeSignal, decodeSignal } from '../core/p2p-signaling.js';
-import { mergeEvents } from './reconciliation.js';
+import { attachSyncProtocol } from './sync-protocol.js';
 
 const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }];
 
@@ -50,43 +50,38 @@ export class P2PConnection {
     this.onSyncEvent = onSyncEvent ?? (() => {});
     this.pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     this.channel = null;
-    this._unsubscribe = null;
+    this._detachSync = null;
   }
 
+  // Wraps the raw RTCDataChannel (string-based, event-callback style)
+  // into sync-protocol.js's own real, transport-agnostic interface —
+  // real JS objects in, real JS objects out, never a raw string
+  // leaking past this one, narrow adapter.
   _wireChannel(channel) {
     this.channel = channel;
-    channel.onopen = async () => {
+    channel.onopen = () => {
       this.onStatusChange('open');
-      this._send({ type: 'full-sync', events: this.dag.topoOrder() });
-      this._unsubscribe = this.dag.subscribe((event) => {
-        this._send({ type: 'new-event', event });
-      });
+      const send = (message) => {
+        if (channel.readyState === 'open') channel.send(JSON.stringify(message));
+      };
+      const onMessage = (cb) => {
+        channel.onmessage = (e) => {
+          let parsed;
+          try {
+            parsed = JSON.parse(e.data);
+          } catch {
+            return; // a malformed message — ignored, never trusted
+          }
+          cb(parsed);
+        };
+        return () => { channel.onmessage = null; };
+      };
+      this._detachSync = attachSyncProtocol(this.dag, { send, onMessage }, this.onSyncEvent);
     };
     channel.onclose = () => {
       this.onStatusChange('closed');
-      if (this._unsubscribe) this._unsubscribe();
+      if (this._detachSync) this._detachSync();
     };
-    channel.onmessage = async (e) => {
-      let message;
-      try {
-        message = JSON.parse(e.data);
-      } catch {
-        return; // a malformed message — ignored, never trusted
-      }
-      if (message.type === 'full-sync' && Array.isArray(message.events)) {
-        const result = await mergeEvents(this.dag, message.events);
-        this.onSyncEvent('full-sync', result);
-      } else if (message.type === 'new-event' && message.event) {
-        const result = await mergeEvents(this.dag, [message.event]);
-        this.onSyncEvent('new-event', result);
-      }
-    };
-  }
-
-  _send(message) {
-    if (this.channel && this.channel.readyState === 'open') {
-      this.channel.send(JSON.stringify(message));
-    }
   }
 
   /** The initiating side: creates a real data channel and a real, gathered offer. */
@@ -121,7 +116,7 @@ export class P2PConnection {
   }
 
   close() {
-    if (this._unsubscribe) this._unsubscribe();
+    if (this._detachSync) this._detachSync();
     if (this.channel) this.channel.close();
     this.pc.close();
     this.onStatusChange('closed');

@@ -71,7 +71,13 @@ public/app/
   WebRTC connection once bootstrapped by hand, or file export/import
   as a fallback; an entropic-space view of what you've observed), and
   Ignition (Solana wallet)
-  p2p-connection.js: the real, live peer-to-peer sync itself
+  p2p-connection.js: the real, live peer-to-peer sync itself (manual handshake)
+  trystero-connection.js: an additional, optional transport — automatic peer
+  discovery via real Nostr relays (Trystero), never a replacement for the
+  manual one above; both share the identical sync-protocol.js
+  sync-protocol.js: the real, transport-agnostic synchronization logic
+  (full-sync, live relay, real verification on receipt) reused by every
+  real transport this project supports
   state-snapshot.js: a real, verified cache of already-verified
   progression, so a reload never re-verifies a domain's entire
   history from genesis
@@ -110,7 +116,7 @@ Automatic on push to `main` — `.github/workflows/deploy.yml` runs the real tes
 
 - The reward formula's fractional exponents require floating-point computation internally — `fromFloat()` (`units.js`) converts the result to a real, exact bigint at that boundary, faithful to what the float actually holds, never fabricating precision it doesn't have.
 - Devnet only. `identity-cost.js`'s own churn-resistance cost curve is real but optional, off by default.
-- `p2p-connection.js` is real WebRTC code, reviewed carefully, but cannot be exercised by this project's own Node-based test suite — RTCPeerConnection has no real equivalent there. Test it yourself, in two real browser tabs, before relying on it.
+- `p2p-connection.js` is real WebRTC code, reviewed carefully, but cannot be exercised by this project's own Node-based test suite — RTCPeerConnection has no real equivalent there. Test it yourself, in two real browser tabs, before relying on it. `trystero-connection.js` carries the identical honest limit, plus a real, third-party Nostr relay round-trip.
 - `wesolowski-vdf.js`'s own RSA-2048 modulus has been cross-checked, digit for digit, against three independent sources (Wikipedia, an encyclopedia mirror, and a math blog) and matches exactly across all three — real, though still short of a primary RSA Laboratories source, which is no longer live.
 - Real browser coverage is whatever has been manually tested and reported back — not automated. A real attempt was made to add Playwright-based automated browser testing; the browser binary download is blocked by this development environment's own network egress rules, so this remains unautomated. Worth setting up yourself if you have unrestricted network access.
 - `interop/rust-vdf/` verifies one real function (the sequential VDF chain) matches byte-for-byte across JS and Rust — it is not a Rust port of the protocol, and no claim is made about any other module reproducing identically in another runtime without the same real work being done for it.

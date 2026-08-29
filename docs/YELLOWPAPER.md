@@ -36,6 +36,12 @@ Full 256-bit digest, hex-encoded, untruncated. The private key authorizes state 
 
 State transitions are signed events referencing causal parents, forming a DAG. A participant need not hold every event, only what is relevant to its own state and observed relationships. $G_1 \cup G_2$, for two independently-grown DAGs, is a commutative union.
 
+### 3.1 Content addressing
+
+$$\mathrm{id}(e) = \mathrm{SHA\text{-}256}\big(\mathrm{JSON}(\mathrm{canon}(\{\mathrm{parents}: \mathrm{sort}(e.\mathrm{parents}), \mathrm{payload}: e.\mathrm{payload}\}))\big)$$
+
+where $\mathrm{canon}(v)$ is defined recursively: for an array, $\mathrm{canon}$ applied element-wise, order preserved; for an object, keys sorted lexicographically and $\mathrm{canon}$ applied to each value under its sorted key; otherwise, $v$ unchanged. This is the one real specification every other section's own use of "the same event" depends on — Mirror's $\mathrm{receivedFrom}$ (§4), the relative rate witness's $\mathrm{sourceEventId}$ (§14), all reference $\mathrm{id}(e)$ under this exact definition. An independent implementation that canonicalizes differently — different key-sort locale, different JSON number formatting, different whitespace — produces a different id for identical semantic content, silently breaking interoperability without any signature failing. Verified concretely alongside §6's own cross-runtime check (`interop/rust-vdf/`): a real, independent Rust implementation of $\mathrm{canon}$ and $\mathrm{id}(\cdot)$ matches the real JS output byte-for-byte for real, non-trivial test events (nested payloads, multiple unordered parents).
+
 ## 4. Mirror
 
 $M_D \in \{\texttt{empty}, \texttt{full}\}$: a domain $D$'s own signed, per-epoch commitment to what it has observed of another domain, never a replica of the observed state.
@@ -60,6 +66,18 @@ seeded from $(\mathrm{domain}, \mathrm{output}_{n-1})$. Symmetric — verificati
 
 **Rate, not calendar time.** A fixed-length chain ($\mathrm{VDF\_ITERATIONS} = 12000$ in this deployment) measures $\sim256\mathrm{ms}$ of real computation — a floor, not a symmetric clock: real hardware differs across domains, so $\mathrm{epoch}_D$ is a true measure of $D$'s own sequential work, correlated with but not equal to elapsed real time for any other domain. Comparing raw epoch counts across domains, or adjusting one domain's earned value against another's, would either discount genuine work under weaker hardware or credit idle time for merely reconnecting (§13).
 
+### 6.1 Asymmetric verification (Wesolowski)
+
+The symmetric chain (above) costs a verifier exactly what it cost the prover — real, but expensive to re-check at scale. A real Wesolowski VDF, over $\mathbb{Z}_N^*$ for a 2048-bit RSA modulus $N$ of unknown factorization (the real, published RSA-2048 challenge number, cross-checked digit-for-digit against three independent sources — Wikipedia, an encyclopedia mirror, a math blog), gives verification cost independent of the real iteration count $T$:
+
+$$y = x^{2^T} \bmod N \qquad \text{(evaluation: $T$ real, sequential squarings)}$$
+
+$$\ell = \mathrm{HashToPrime}(x, T, y) \qquad \pi = x^{\lfloor 2^T/\ell \rfloor} \bmod N \qquad \text{(proof: a real, separate $T$-step pass)}$$
+
+$$r = 2^T \bmod \ell \qquad \text{Verify: } \pi^{\ell} \cdot x^{r} \stackrel{?}{=} y \pmod N$$
+
+Real prover cost is on the order of $2T$ modular multiplications (evaluation's own $T$ plus the proof's own $T$ — the proof does not free-ride on evaluation's work, since $\ell$ depends on the real $y$). Real verifier cost is $O(\log T)$ — the entire point: unconditionally cheap regardless of how large $T$ grows, verified concretely (a fabricated $y$, or a proof computed against a wrong $\ell$, is rejected; verification time does not grow with $T$). $\ell$ is derived deterministically from $(x, T, y)$ via a real hash-to-prime — never accepted as prover-supplied input, closing the one real freedom a dishonest prover would otherwise have.
+
 ## 7. Accrual
 
 $$R(S, t, A) = \frac{S \cdot t^{\alpha}}{\left[\beta \ln A + \ln\left(1 + C/A^{\beta}\right)\right]^{\gamma}}$$
@@ -83,13 +101,27 @@ $$b_D = \sum_{\text{valid burns}} \mathrm{lamports}_i$$
 
 Activation requires an irreversible SOL burn to Solana's incinerator address, verified from a finalized transaction record. Cumulative across every valid burn, each independently checked against the deployment's own churn cost curve at its own slot — a later commitment is never grandfathered at an earlier, lower requirement.
 
-$R$ is linear in $S$: absent a genesis cost, splitting capital across identities would not reduce total accrual. A per-identity activation cost makes churn strictly costlier, not free; whether a given $(\alpha,\beta,\gamma,C,\text{cost curve})$ tuple makes churn net-unprofitable — not merely costly — is computed, not asserted (§*churn-analysis.js*).
+$R$ is linear in $S$: absent a genesis cost, splitting capital across identities would not reduce total accrual. A per-identity activation cost makes churn strictly costlier, not free.
+
+### 8.1 Whether churn pays
+
+Existence of a real cost is not the same claim as sufficiency. For a real span of $N$ epochs and committed capital $S$:
+
+$$\text{stay}(N) = R(S, N, N) - \mathrm{cost}(0)$$
+
+$$\text{churn}(N, k) = \left\lfloor \frac{N}{k} \right\rfloor \cdot \left[R(S, k, k) - \mathrm{cost}(\text{slot at cycle start})\right]$$
+
+comparing one domain that commits once and matures for the full span against one that restarts every $k$ epochs, repeatedly re-entering at low $A$ where $R$'s own denominator is smallest. Verified concretely: with zero real cost, churn wins outright (12.31 against 5.67 over identical parameters); with a real, deliberately-chosen cost curve, churn nets negative (−27.69) while staying nets positive (3.67) — the identical $R$, the only real difference being $\mathrm{cost}(\cdot)$'s own magnitude. `findMostProfitableChurnInterval` sweeps $k$ over a real candidate range to find an attacker's own real best case, rather than checking one interval and declaring victory. This is a real calculator, computed per deployment's own chosen $(\alpha,\beta,\gamma,C)$ and cost curve — never a general proof that any given tuple is safe.
 
 **External dependency.** Broadcasting a burn, or any further Solana-side action, requires reaching a centralized, Earth-hosted RPC endpoint over real internet — the one exception to this document's own no-shared-infrastructure principle. Once activated, $\mathrm{epoch}_D$ requires no further contact with Solana or Earth.
 
 ## 9. Conservation
 
-A claimed unit is discrete and owned. Transfer requires a signature proving control over the source; split divides one claim into two whose amounts sum exactly to the original, by construction (integer subtraction), never a separately-checked invariant. Neither operation depends on continued access to progression or the activation chain.
+A claim is a tuple $(\mathrm{id}, \mathrm{amount}, \mathrm{owner}, \mathrm{status} \in \{\mathrm{active}, \mathrm{inactive}\})$. Neither operation below depends on continued access to progression or the activation chain.
+
+**Split.** $C \to (C_1, C_2)$ where $\mathrm{amount}(C_1) + \mathrm{amount}(C_2) = \mathrm{amount}(C)$ by construction — $\mathrm{amount}(C_2) := \mathrm{amount}(C) - \mathrm{amount}(C_1)$ computed once, never independently re-derived and checked against a second formula that could disagree with the first. $C$ deactivates atomically with $C_1, C_2$'s issuance; a real, fresh pair of ids is required, never reusing an id already in the claim set.
+
+**Transfer.** $\mathrm{proveTransfer}(C, \mathrm{from}, \mathrm{to})$ requires a real signature over $(\mathrm{claimId}, \mathrm{from}, \mathrm{to}, n, \mathrm{derivation})$ verifiable against $\mathrm{from}$'s own real public key — $n$ a real, monotonically-tracked nonce per claim, rejecting any replayed proof outright. Deactivation of the source claim, signature verification, and activation of the destination claim under $\mathrm{to}$ all occur within the same real, atomic call — a failed verification anywhere in that sequence discards the whole attempt, never leaving a claim deactivated with no successor.
 
 ## 10. Denomination
 
@@ -105,7 +137,7 @@ Each domain continues independently through partition; none decrements state for
 
 Published interplanetary-cryptocurrency proposals generally extend one Earth-anchored consensus chain across the latency gap — DTN transport, timelocks widened to light-time, federated or merge-mined settlement — leaving consensus and issuance untouched. This transfers already-created value under latency; it leaves creation itself dominated by whichever side has more compute (mining from Mars against Earth's hashpower is acknowledged, in that literature, as structurally unprofitable).
 
-AIWA removes value creation from any consensus chain: $\mathrm{epoch}_D$ requires no awareness of one. Reconciliation (§4, §13) is additive and informational only. This closes the specific asymmetry above; it does not address real byte transport under latency (reused, not reinvented — §*p2p-connection.js*) nor an exchange rate between economies that grew apart.
+AIWA removes value creation from any consensus chain: $\mathrm{epoch}_D$ requires no awareness of one. Reconciliation (§4, §13) is additive and informational only. This closes the specific asymmetry above; it does not address real byte transport under latency (reused, not reinvented, and deliberately pluggable — `sync-protocol.js`'s own real synchronization logic is transport-agnostic by construction, shared identically by a manual WebRTC handshake and an automatic, Nostr-relay-assisted one, with room for a real DTN or dedicated-hardware transport later without touching this logic at all) nor an exchange rate between economies that grew apart.
 
 ## 12. Explicit non-claims
 
@@ -116,6 +148,8 @@ Not solved: the human-identity oracle, physical-location verification, absolute 
 A domain's own $\mathrm{epoch}_D$ (§5) is unconditional and requires zero external observers. Causal Tick is a complementary, externally-corroborated position — useful for reconciliation and for flagging drift between self-report and observation, never a substitute.
 
 $$\hat{\theta}_X = \mathrm{median}_w\left(\{(\mathrm{obs}_i(X), w_i)\}\right), \qquad w_i = b_i \text{ (§8)}$$
+
+concretely, sort estimates by value; walk the cumulative weight; return the first value where $\sum_{j \leq i} w_j \geq \frac{1}{2}\sum_j w_j$. This crossing-point definition — not an average of the two central values — is what makes the $\sum w_i/2$ robustness bound below exact, not approximate: the returned value is always one a real majority of weight has voted at or below.
 
 One estimate per real observer — their own most-recent, highest-resolving observation of $X$ — never one per historical commitment referencing the same fact; an earlier version double-counted replayed observations, closed here. $[\min_i \mathrm{obs}_i, \max_i \mathrm{obs}_i]$ is reported alongside $\hat\theta_X$, not discarded. Robust while adversarial weight stays below $\sum w_i / 2$ — proof-of-stake's own security shape, applied to causal position.
 
@@ -182,7 +216,7 @@ $\rho_{AB} \cdot \rho_{BC} = \rho_{AC}$ holds mathematically, but composing two 
 | Causal Tick (§13) | `public/core/causal-tick.js`, `public/core/weighted-median.js` |
 | Hardware roots (§13.1) | `public/core/hardware-attestation.js` |
 | Relative rate, no clock (§14) | `public/core/relative-rate.js` — purely informational, weighted like §13 |
-| Live peer-to-peer sync | `public/core/p2p-signaling.js`, `public/app/p2p-connection.js` |
+| Live peer-to-peer sync | `public/core/p2p-signaling.js`, `public/app/sync-protocol.js`, `public/app/p2p-connection.js`, `public/app/trystero-connection.js` |
 | Coherent composition | `public/core/wallet.js` |
 
 246 tests; every case but the cross-runtime check runs unconditionally, which skips (never fails) without a Rust toolchain. Security-relevant cases are named as such in their own files.

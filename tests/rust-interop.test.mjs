@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { computeVdfChain, vdfSeed } from '../public/core/vdf.js';
 import { deriveDomainId } from '../public/core/domain-id.js';
+import { EventDag } from '../public/core/event-dag.js';
 
 // A real, independent Rust implementation (interop/rust-vdf) of the
 // identical, real specification vdf.js and domain-id.js implement —
@@ -50,4 +51,22 @@ test('THE REAL CROSS-RUNTIME PROPERTY: an independent Rust implementation produc
   assert.equal(rustOutput.vdf2, vdf2, 'a real, chained (epoch depends on prior real output) VDF chain must match exactly');
   assert.equal(rustOutput.vdf3, vdf3, 'a real, full-length (12000-iteration) VDF chain, matching this project\'s own real VDF_ITERATIONS, must match exactly');
   assert.equal(rustOutput.domainId, domainId, 'real domain-id derivation (SHA-256 of a public key) must match exactly across runtimes too');
+
+  // §3.1's own real canonicalization — the literal foundation every
+  // other section's "the same event" depends on. Verified here with a
+  // real, non-trivial event: a nested payload, and parents given
+  // deliberately out of order, so real sorting is actually exercised,
+  // not just trivially passed through.
+  const dag = new EventDag();
+  const genesisId = await dag.addEvent([], { type: 'genesis' });
+  const accrualId = await dag.addEvent([], { type: 'accrual', domain: 'z-domain', b: 10 });
+  const composedId = await dag.addEvent([accrualId, genesisId], {
+    type: 'reception', domain: 'test-domain', epoch: 3,
+    receivedFrom: [{ sourceDomain: 'c', eventId: 'e1' }, { sourceDomain: 'a', eventId: 'e2' }],
+    kind: 'full',
+  });
+
+  assert.equal(rustOutput.genesisId, genesisId, 'a real, minimal event id must match exactly across runtimes');
+  assert.equal(rustOutput.accrualId, accrualId, 'a real event with a flat payload must match exactly across runtimes');
+  assert.equal(rustOutput.composedId, composedId, 'a real event with a nested payload and out-of-order parents must match exactly — the real test of §3.1\'s own canonical sort, not just a pass-through case');
 });
