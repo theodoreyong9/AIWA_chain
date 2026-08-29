@@ -8,7 +8,7 @@ Live: https://theodoreyong9.github.io/AIWA_chain/
 
 A focused reference implementation of the AIWA protocol (see `docs/YELLOWPAPER.md`): identity, a real sequential-delay progression mechanism, an accrual formula, conservation of transferred value, a real Mirror/reception layer, and a real weighted Causal Tick — composed into two wallets, not a general-purpose platform. No modules, no plugin registry, no pools. That scope was deliberately cut to get this part right first.
 
-246 real tests, security-relevant cases named as such — all but one run unconditionally; the real cross-runtime check skips gracefully, never fails, if no Rust toolchain is available.
+275 real tests, security-relevant cases named as such — all but one run unconditionally; the real cross-runtime check skips gracefully, never fails, if no Rust toolchain is available.
 
 ## The design principle this whole project is built around
 
@@ -64,6 +64,14 @@ public/core/
                              live connection
   wallet.js                     composes accrual + conservation coherently, by construction —
                              a claim can never debit one side without the other
+  relative-rate.js               real relative computation rate between two domains, without
+                             ever consulting a clock — purely informational, burn-weighted
+  generous-transfer.js           an external contract, not a protocol change: a real,
+                             optional bonus a donor may attach to an ordinary transfer,
+                             resolved deterministically by a real future VDF output of the
+                             recipient's own chain — never chance, never a shared pool
+  contract-registry.js           publishes any real contract's own source as a real,
+                             content-addressed event — no interface yet; code-only today
 
 public/app/
   the reference UI — Continuum (AIWA wallet, a real trajectory of your
@@ -117,6 +125,7 @@ Automatic on push to `main` — `.github/workflows/deploy.yml` runs the real tes
 - The reward formula's fractional exponents require floating-point computation internally — `fromFloat()` (`units.js`) converts the result to a real, exact bigint at that boundary, faithful to what the float actually holds, never fabricating precision it doesn't have.
 - Devnet only. `identity-cost.js`'s own churn-resistance cost curve is real but optional, off by default.
 - `p2p-connection.js` is real WebRTC code, reviewed carefully, but cannot be exercised by this project's own Node-based test suite — RTCPeerConnection has no real equivalent there. Test it yourself, in two real browser tabs, before relying on it. `trystero-connection.js` carries the identical honest limit, plus a real, third-party Nostr relay round-trip.
+- `contract-registry.js` is real and tested, but has no interface yet — publishing or reading a contract-spec today means calling it directly by code, never through Continuum, Ignition, or Mirror. A genuine proof of concept, not a finished feature.
 - `wesolowski-vdf.js`'s own RSA-2048 modulus has been cross-checked, digit for digit, against three independent sources (Wikipedia, an encyclopedia mirror, and a math blog) and matches exactly across all three — real, though still short of a primary RSA Laboratories source, which is no longer live.
 - Real browser coverage is whatever has been manually tested and reported back — not automated. A real attempt was made to add Playwright-based automated browser testing; the browser binary download is blocked by this development environment's own network egress rules, so this remains unautomated. Worth setting up yourself if you have unrestricted network access.
 - `interop/rust-vdf/` verifies one real function (the sequential VDF chain) matches byte-for-byte across JS and Rust — it is not a Rust port of the protocol, and no claim is made about any other module reproducing identically in another runtime without the same real work being done for it.

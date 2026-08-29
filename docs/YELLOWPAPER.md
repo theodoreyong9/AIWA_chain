@@ -197,6 +197,44 @@ $\rho_{AB} \cdot \rho_{BC} = \rho_{AC}$ holds mathematically, but composing two 
 
 ---
 
+## 15. Generous transfer — deterministic, never chance
+
+A donor may optionally, voluntarily attach a real, additional, conditional bonus to an ordinary transfer (§9) — payable only if a specific, real, future progression event of the *recipient's own* chain meets a public threshold. Structurally identical to mining's own real property: the outcome is a pure function of public data, unpredictable only because one real input (a real, sequential VDF output) genuinely does not exist yet. No randomness anywhere; not a lottery under the conventional consideration/chance/prize test, since the chance element is replaced by real, unforgeable sequential work, exactly as with proof-of-work.
+
+$$c = (\mathrm{contractId}, \mathrm{baseTransferId}, \mathrm{to}, \mathrm{bonusClaimId}, \mathrm{bonusAmount}, \mathrm{thresholdBits}), \quad \text{signed by the donor}$$
+
+$$h = \mathrm{SHA\text{-}256}(\mathrm{id}(c) \,\|\, \mathrm{vdfOutput}(e_q)) \qquad \text{win} \iff h \text{ has} \geq \mathrm{thresholdBits} \text{ leading zero bits}$$
+
+where $e_q$ is a real progression event of $\mathrm{to}$'s own chain with $\mathrm{id}(c)$ among its real parents, and $e_q$'s own VDF proof independently re-verified (§6) against $\mathrm{to}$'s own real prior output — never trusted from the event's shape alone. Progression's own strict sequentiality (§5) means at most one real $e_q$ can ever exist for a given real epoch, verified end to end against the real protocol: a real second attempt at an alternate "same epoch" is genuinely rejected (`expected epoch N+1, got N`).
+
+**Two real vulnerabilities were found and closed before this was ever shipped**, both worth stating plainly rather than only fixing silently. First: an earlier construction combined $c$ with $e_q$'s own full content-addressed id rather than its raw VDF output — since an event's id also depends on cheaply-variable fields (which extra parents are attached), a recipient could privately construct many candidate events reusing the identical, already-computed real VDF output, check each one's outcome, and broadcast only a favorable one, without ever redoing real work. Verified concretely: five candidates, three "wins," using one real VDF computation. Second: without independently re-verifying $e_q$'s own VDF proof, a fabricated $\mathrm{vdfOutput}$ — never really, sequentially computed at all — could be ground for a favorable hash directly. Both close for the identical, real reason: the outcome now depends only on values that genuinely require real, sequential, unshortcuttable work to produce or vary — never on a field cheap to change.
+
+**No fabricated value.** $\mathrm{bonusAmount}$ is real, already-owned AIWA the donor irrevocably signed away in advance from their own real $\mathrm{bonusClaimId}$ — never created from nothing, never touching any other domain's funds, never a shared pool (§9's own Conservation applies unchanged).
+
+**Enforceable by anyone.** Resolution requires only real, already-public data — $c$'s own signature, $e_q$'s own real, independently-verifiable content — so the recipient, or any third party, can construct and submit it; the donor's cooperation is never required after the fact, and cannot be withheld.
+
+### 15.1 Contract identity and composability
+
+This is deliberately built as an external contract, never a modification to the core protocol above — the same real, existing primitives (transfer, progression, VDF verification) are only ever *consumed*, never altered. A domain's own address is a direct cryptographic proof (§2); encoding a contract tag into it risks real confusion about which real destination a transfer actually targets, so this contract's own $\mathrm{CONTRACT\_ID} = \texttt{aiwa-generous-transfer-v1}$ is instead part of $c$'s own signed content (§ above), never mangled into an address. A later, composing contract references this same real, public id explicitly in its own events (e.g. its own real field $\mathrm{wrapsContractId} = \mathrm{CONTRACT\_ID}$) rather than adopting any address-mangling scheme — "upstream" (other contracts building on this one) and "downstream" (users sending through it directly) both resolve to the identical, real, public string.
+
+## 16. Publishing a contract, content-addressed
+
+A plain string identifier (§15.1) carries no cryptographic anchor by itself — nothing stops a second, different implementation from claiming the identical name. `contract-registry.js` closes this using the identical, real content-addressing already used for every other event (§3.1): a contract's own real, complete source is embedded — never only its hash — in an ordinary `contract-spec` event published into the same DAG everything else lives in, so the real code is genuinely recoverable by anyone who receives this event, not merely fingerprint-verifiable against a copy kept elsewhere.
+
+$$\mathrm{sourceHash} = \mathrm{SHA\text{-}256}(\mathrm{sourceCode}) \qquad e_{\mathrm{spec}} = \mathrm{addEvent}([], \{\mathrm{name}, \mathrm{version}, \mathrm{sourceCode}, \mathrm{sourceHash}, \mathrm{description}\})$$
+
+Once $e_{\mathrm{spec}}$ is received by other domains (Mirror, §4, exactly like any other real event), it is immutable in the identical, real sense every event already is here — not a new guarantee, simply what publishing an event has always meant. A single altered character in the real source produces a genuinely different real hash, verified concretely. $\mathrm{sourceHash}$ is kept alongside the full body for cheap comparison without re-hashing every time.
+
+**No canonical registry, deliberately.** This never enforces that exactly one implementation may claim a given name — multiple, real, competing contracts can coexist, each with its own real, verifiable identity; wallets and users choose which to trust, exactly as no single chain enforces one true implementation of a common token standard.
+
+**Honest limit, current state.** No interface exists yet — publishing and reading a contract-spec is only ever done by code today, real and tested, never through Continuum, Ignition, or Mirror. A genuine proof of concept: the mechanism is real and safe; only the interface to reach it is missing. Real transport (§11.1's own P2P sync, unchanged) already carries a `contract-spec` event exactly like any other — the missing piece is narrower than transport.
+
+### 16.1 A real, asymmetric trust direction for interchain verification (unexplored, not built)
+
+Every real event here is verifiable using only standard, non-proprietary primitives (Ed25519 signatures, SHA-256 content addressing) — never a proprietary format only this project's own software understands. This means a genuinely different trust direction than a typical bridge: a bridge usually requires the receiving chain to trust an oracle or validator set's own claim about what happened elsewhere. Verifying one of *this* project's real events requires trusting no organization at all — only the same, already-public, standard algorithms most chains already implement natively. An external chain wanting to verify a real AIWA event would build its own adapter, entirely on its own terms, using only already-public primitives — never a dependency this protocol introduces or must maintain. This is stated as a real, reasoned architectural property this design already has — not a built feature; no adapter exists yet, and verifying an event's authenticity remains distinct from any external chain's own decision about what to do with that information.
+
+---
+
 ## Reference implementation
 
 | Concept | File |
@@ -216,7 +254,9 @@ $\rho_{AB} \cdot \rho_{BC} = \rho_{AC}$ holds mathematically, but composing two 
 | Causal Tick (§13) | `public/core/causal-tick.js`, `public/core/weighted-median.js` |
 | Hardware roots (§13.1) | `public/core/hardware-attestation.js` |
 | Relative rate, no clock (§14) | `public/core/relative-rate.js` — purely informational, weighted like §13 |
+| Generous transfer, deterministic (§15) | `public/core/generous-transfer.js` — never chance, verified end-to-end against the real progression protocol |
+| Contract publishing, content-addressed (§16) | `public/core/contract-registry.js` |
 | Live peer-to-peer sync | `public/core/p2p-signaling.js`, `public/app/sync-protocol.js`, `public/app/p2p-connection.js`, `public/app/trystero-connection.js` |
 | Coherent composition | `public/core/wallet.js` |
 
-246 tests; every case but the cross-runtime check runs unconditionally, which skips (never fails) without a Rust toolchain. Security-relevant cases are named as such in their own files.
+275 tests; every case but the cross-runtime check runs unconditionally, which skips (never fails) without a Rust toolchain. Security-relevant cases are named as such in their own files.
