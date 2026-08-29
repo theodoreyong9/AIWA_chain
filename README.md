@@ -8,7 +8,7 @@ Live: https://theodoreyong9.github.io/AIWA_chain/
 
 A focused reference implementation of the AIWA protocol (see `docs/YELLOWPAPER.md`): identity, a real sequential-delay progression mechanism, an accrual formula, conservation of transferred value, a real Mirror/reception layer, and a real weighted Causal Tick — composed into two wallets, not a general-purpose platform. No modules, no plugin registry, no pools. That scope was deliberately cut to get this part right first.
 
-229 real tests, security-relevant cases named as such — all but one run unconditionally; the real cross-runtime check skips gracefully, never fails, if no Rust toolchain is available.
+246 real tests, security-relevant cases named as such — all but one run unconditionally; the real cross-runtime check skips gracefully, never fails, if no Rust toolchain is available.
 
 ## The design principle this whole project is built around
 

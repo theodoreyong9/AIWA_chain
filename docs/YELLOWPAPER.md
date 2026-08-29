@@ -137,6 +137,30 @@ The evidence interface functions on software primitives alone. A domain may opti
 
 Identity is the keypair, never a device: loss of hardware is real but never identity loss, restored unchanged from a saved key or passphrase (§8) on any reachable device. This closes device loss, not the case this document is otherwise built around — a domain with no reachable device or channel at all, for a real, extended period. No device, old or new, has anything to reconnect to in that case, regardless of key; hardware roots strengthen assurance for a domain that *is* reachable, and do not substitute for reachability during a real partition.
 
+## 14. Relative rate, without a clock
+
+A domain's own $\mathrm{epoch}_D$ is already an unfakeable marker of real, sequential work (§6). A real, signed statement — "at my own epoch $e_O$, I observed target $X$ at their own epoch $e_X$" — uses this marker for something new, and consults no clock, no timestamp, no declared duration, at any point, by any party.
+
+$$w = (\mathrm{observer}, e_O, \mathrm{target}, e_X, \mathrm{sourceEventId})$$
+
+From two such real, successive, valid witnesses $w_1, w_2$ by the same observer about the same target:
+
+$$\rho = \frac{e_{X,2} - e_{X,1}}{e_{O,2} - e_{O,1}}$$
+
+a purely structural ratio. **This is not underdetermined**, though a single snapshot of raw epoch counts would be: with no external reference, a single comparison cannot distinguish "ran longer" from "ran faster." A second, later observation removes the ambiguity — the absolute interval between $w_1$ and $w_2$ is never known or needed; only the real, verified deltas are.
+
+**Aggregate.** Many real $(\mathrm{observer}, \mathrm{target})$ pairs, each weighted by the observer's own real committed capital (§8) — the identical security shape already used for $\hat\theta_X$ (§13): a weighted median, robust while adversarial weight stays below half the total real weight contributing an estimate. Verified concretely: ten real, independently-speeded domains recover their real relative rates exactly; a funded but minority-weight adversary reporting a fabricated ratio does not move the aggregate.
+
+**Purely informational**, by the same principle as §13: this never feeds back into what any domain may claim, never bounds or adjusts $\mathrm{epoch}_D$ for anyone. It is offered as a real, emergent statistical regularity — never a synchronization primitive, never a shared clock, never an input any domain's own security depends on. It is a measure of *relative rate between a pair*, never itself a claim of convergence toward a network-wide homogeneous cadence; whether real-world hardware happens to cluster or spread is an empirical fact about physical reality, neither caused nor established by this mechanism.
+
+### 14.1 Composition is unsafe without a freshness bound
+
+$\rho_{AB} \cdot \rho_{BC} = \rho_{AC}$ holds mathematically, but composing two independently-measured real ratios is unsafe if the intermediate domain's own real rate can drift between the two measurements — genuinely, with no forged signature required. Verified concretely: a real, honest change in $B$'s own rate between measuring $\rho_{AB}$ and $\rho_{BC}$ produced a $2\times$ error in the naively composed result. A malicious $B$, who freely chooses when it measures the next link, can exploit this without forging anything.
+
+**Bound.** `composeRelativeRates` requires the real, verified epoch gap on $B$'s own progression — between $B$'s epoch as last referenced in the $A\to B$ pair and $B$'s own epoch when it began the $B\to C$ pair — to stay within a caller-supplied `maxFreshnessGap`, refusing composition outright otherwise. Still no clock: the bound is expressed entirely in $B$'s own already-verified epoch count.
+
+**A mitigation, not a closure.** A tighter bound reduces the window for drift or adversarial timing, verified concretely (a 5-epoch gap composed exactly; a 9900-epoch gap did not), but does not eliminate it — genuine drift can occur within any bound, and the intermediate domain still freely chooses when it measures within that bound. A caller should treat a wide accepted gap as real, reduced confidence, never as equivalent to a short, direct measurement.
+
 ---
 
 ## Reference implementation
@@ -157,7 +181,8 @@ Identity is the keypair, never a device: loss of hardware is real but never iden
 | Mirror (§4) | `public/core/mirror.js` |
 | Causal Tick (§13) | `public/core/causal-tick.js`, `public/core/weighted-median.js` |
 | Hardware roots (§13.1) | `public/core/hardware-attestation.js` |
+| Relative rate, no clock (§14) | `public/core/relative-rate.js` — purely informational, weighted like §13 |
 | Live peer-to-peer sync | `public/core/p2p-signaling.js`, `public/app/p2p-connection.js` |
 | Coherent composition | `public/core/wallet.js` |
 
-229 tests; every case but the cross-runtime check runs unconditionally, which skips (never fails) without a Rust toolchain. Security-relevant cases are named as such in their own files.
+246 tests; every case but the cross-runtime check runs unconditionally, which skips (never fails) without a Rust toolchain. Security-relevant cases are named as such in their own files.
