@@ -9,12 +9,15 @@ import { render, applyIncremental } from './app.js';
 import { spendableClaims, buildSignedTransferEvent, buildSignedSplitEvent } from '../core/wallet.js';
 import { format as formatAiwaAmount, toUnits } from '../core/units.js';
 import { buildOfferPayload, CONTRACT_ID } from '../core/generous-transfer.js';
+import { buildMatchCommitment, CONTRACT_ID as MATCH_CONTRACT_ID } from '../core/matching-contract.js';
 import { publishContractSpec, scanContractSpecs } from '../core/contract-registry.js';
 
 let sendMsg = null;
 let busy = false;
 let publishMsg = null;
 let publishBusy = false;
+let matchMsg = null;
+let matchBusy = false;
 
 // A few real, named difficulty presets — real leading-zero-bit
 // thresholds, never a percentage the UI just decorates: the real
@@ -57,7 +60,7 @@ async function ensureClaimOfAmount(claims, accruedUnclaimed, amount, raw) {
 export function renderGenerous(root) {
   if (!state.domainId) {
     root.innerHTML = `
-      <div class="top-bar"><div style="display:flex; align-items:center; gap:10px"><div class="wordmark">AIWA <em>chain</em></div><a href="https://github.com/theodoreyong9/AIWA_chain" target="_blank" rel="noopener" class="gh-link" title="View source on GitHub">GitHub</a><a href="YELLOWPAPER.pdf" target="_blank" class="gh-link" title="Read the Yellow Paper (PDF)">Yellow Paper</a></div></div>
+      <div class="top-bar"><div style="display:flex; align-items:center; gap:10px"><div class="wordmark">AIWA <em>chain</em></div><a href="https://github.com/theodoreyong9/AIWA_chain" target="_blank" rel="noopener" class="gh-link" title="View source on GitHub">GitHub</a><a href="YELLOWPAPER.pdf" target="_blank" class="gh-link" title="Read the Yellow Paper (PDF)">Yellow Paper</a><a href="https://github.com/theodoreyong9/AIWA_chain/blob/main/docs/WRITING-A-CONTRACT.md" target="_blank" rel="noopener" class="gh-link" title="Real guide for writing your own contract">Contract Guide</a></div></div>
       <div class="tabs">
         <div class="tab" data-tab="continuum">Continuum</div>
         <div class="tab" data-tab="mirror">Mirror</div>
@@ -82,7 +85,7 @@ export function renderGenerous(root) {
 
   root.innerHTML = `
     <div class="top-bar">
-      <div style="display:flex; align-items:center; gap:10px"><div class="wordmark">AIWA <em>chain</em></div><a href="https://github.com/theodoreyong9/AIWA_chain" target="_blank" rel="noopener" class="gh-link" title="View source on GitHub">GitHub</a><a href="YELLOWPAPER.pdf" target="_blank" class="gh-link" title="Read the Yellow Paper (PDF)">Yellow Paper</a></div>
+      <div style="display:flex; align-items:center; gap:10px"><div class="wordmark">AIWA <em>chain</em></div><a href="https://github.com/theodoreyong9/AIWA_chain" target="_blank" rel="noopener" class="gh-link" title="View source on GitHub">GitHub</a><a href="YELLOWPAPER.pdf" target="_blank" class="gh-link" title="Read the Yellow Paper (PDF)">Yellow Paper</a><a href="https://github.com/theodoreyong9/AIWA_chain/blob/main/docs/WRITING-A-CONTRACT.md" target="_blank" rel="noopener" class="gh-link" title="Real guide for writing your own contract">Contract Guide</a></div>
       <div style="display:flex; align-items:center; gap:8px">
         <div class="address-chip" id="addr-copy" title="Click to copy">${short(state.domainId, 10)}</div>
       </div>
@@ -135,6 +138,19 @@ export function renderGenerous(root) {
         }).join('')
       }
       <p class="hint" style="margin-top:8px">A real "no win" here can only ever be shown once their own progression, resolving your offer, has genuinely reached you \u2014 reconcile with them (Mirror) if this stays "pending" longer than you'd expect.</p>
+    </div>
+
+    <div class="card" style="background:transparent; border-style:dashed">
+      <div class="card-title">Match someone else's offer</div>
+      <p class="hint">A real, second, composing contract (<code>${MATCH_CONTRACT_ID}</code>) \u2014 add your own real, extra amount on top of an offer someone else already sent. Resolves at the exact same moment the wrapped offer does, using its own real, direct outcome \u2014 never a separate guess.</p>
+      <label class="field-label">Offer to match (its real event id)</label>
+      <input type="text" id="mc-offer-id" placeholder="the real, wrapped offer's own event id" />
+      <label class="field-label" style="margin-top:10px">Real recipient (must match the wrapped offer's own)</label>
+      <input type="text" id="mc-to" placeholder="recipient's real domain id" />
+      <label class="field-label" style="margin-top:10px">Your own extra amount</label>
+      <input type="text" id="mc-amount" placeholder="0.00" inputmode="decimal" />
+      <div class="btn-row" style="margin-top:12px"><button id="mc-match-btn" ${matchBusy ? 'disabled' : ''}>${matchBusy ? 'Sending\u2026' : 'Match'}</button></div>
+      <div id="mc-msg">${matchMsg ?? ''}</div>
     </div>
 
     <div class="card">
@@ -239,6 +255,41 @@ export function renderGenerous(root) {
       publishMsg = `<div class="msg error">${e.message}</div>`;
     }
     publishBusy = false;
+    render();
+  });
+
+  root.querySelector('#mc-match-btn').addEventListener('click', async () => {
+    const msgEl = root.querySelector('#mc-msg');
+    const wrappedGenerousSendEventId = root.querySelector('#mc-offer-id').value.trim();
+    const to = root.querySelector('#mc-to').value.trim();
+    const matchAmountRaw = root.querySelector('#mc-amount').value.trim();
+
+    if (!wrappedGenerousSendEventId) { msgEl.innerHTML = `<div class="msg error">Enter the real, wrapped offer's own event id.</div>`; return; }
+    if (!to) { msgEl.innerHTML = `<div class="msg error">Enter the real recipient domain id.</div>`; return; }
+    let matchAmount;
+    try { matchAmount = toUnits(matchAmountRaw); } catch (e) { msgEl.innerHTML = `<div class="msg error">${e.message}</div>`; return; }
+    if (!(matchAmount > 0n)) { msgEl.innerHTML = `<div class="msg error">Enter a positive amount.</div>`; return; }
+
+    matchBusy = true; render();
+    try {
+      const currentClaims = spendableClaims(state.wallet, state.domainId);
+      const matchClaimId = await ensureClaimOfAmount(currentClaims, 0n, matchAmount, matchAmountRaw);
+      if (!matchClaimId) throw new Error('No single source covers this amount.');
+
+      const matchCommitment = await buildMatchCommitment(state.keypair, { wrappedGenerousSendEventId, matchClaimId, matchAmount: matchAmountRaw, to });
+      const preSignedTransfer = await buildSignedTransferEvent({ claimId: matchClaimId, from: state.domainId, to }, state.keypair.secretKey.slice(0, 32), state.keypair.publicKey.toBytes());
+
+      const payload = { type: 'match-commitment', matchCommitment, preSignedTransfer };
+      const parents = [state.lastEventId];
+      const newId = await state.dag.addEvent(parents, payload);
+      state.lastEventId = newId;
+      await applyIncremental(newId, parents, payload);
+
+      matchMsg = `<div class="msg ok">Sent \u2014 resolves automatically once the wrapped offer does.</div>`;
+    } catch (e) {
+      matchMsg = `<div class="msg error">${e.message}</div>`;
+    }
+    matchBusy = false;
     render();
   });
 }

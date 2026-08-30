@@ -67,3 +67,29 @@ export async function verifyContractSource(specEvent, sourceCode) {
 export function scanContractSpecs(events) {
   return events.filter((ev) => ev.payload?.type === 'contract-spec').map((ev) => ({ id: ev.id, ...ev.payload }));
 }
+
+/**
+ * The one, real, structural close to the contractId-collision risk
+ * (§15.1) — verified concretely: a real signature alone only ever
+ * proves "signed by this key, over this exact content," never "this
+ * is really the trusted module you think it is." Nothing stops a
+ * real, different, possibly malicious contract from simply choosing
+ * an existing `contractId` string.
+ *
+ * This makes registration itself demand proof, not just a name:
+ * `verifierFn` is only ever added to the real registry if `sourceCode`
+ * genuinely, currently hashes to `expectedHash` — a real, deliberate
+ * pin the application's own code carries (see `app.js`'s own real
+ * `CONTRACT_VERIFIERS`), never trusted from whatever a contract
+ * happens to claim about itself. A real mismatch throws outright —
+ * never a silent skip, never a partial registration.
+ *
+ * @returns {object} a real, new registry with the real entry added
+ */
+export async function registerVerifiedContract(contractVerifiers, { contractId, sourceCode, expectedHash, verifyPayoutFn }) {
+  const realHash = await computeContractHash(sourceCode);
+  if (realHash !== expectedHash) {
+    throw new Error(`Refusing to register '${contractId}': real source hash ${realHash} does not match the expected, pinned ${expectedHash} — this is not genuinely the trusted contract it claims to be.`);
+  }
+  return { ...contractVerifiers, [contractId]: verifyPayoutFn };
+}

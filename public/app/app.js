@@ -3,15 +3,18 @@ import { createPersistedDag } from './persistence.js';
 import { applyWalletEvent, initialWalletState } from '../core/wallet.js';
 import { applyMirrorEvent, deriveSourceEpochLookup, initialMirrorState } from '../core/mirror.js';
 import { computeCausalTick } from '../core/causal-tick.js';
-import { deriveIdentityCostState } from './identity-cost-view.js';
+import { initialIdentityCostState, registerIdentityCost } from '../core/identity-cost.js';
 import { saveSnapshot, loadSnapshot } from './state-snapshot.js';
 import { state, REWARD_PARAMS, VDF_ITERATIONS, notify } from './state.js';
 import { renderContinuum } from './continuum.js';
 import { renderIgnition } from './ignition.js';
 import { renderMirror, applyIncomingOfferFromHash } from './mirror-view.js';
 import { computeOutcomeHash, checkOutcome, verifyPayout } from '../core/generous-transfer.js';
+import { verifyPayout as verifyMatchPayout } from '../core/matching-contract.js';
+import { registerVerifiedContract } from '../core/contract-registry.js';
 import { renderGenerous } from './generous-view.js';
 import { scanForPendingGenerousSends, scanForSentGenerousSends, scanSentGenerousSendOutcomes } from './generous-send-scan.js';
+import { scanPendingMatchCommitments, scanResolvedOfferIds } from './matching-contract-scan.js';
 
 const DB_NAME = 'aiwa-chain-local';
 
@@ -104,11 +107,18 @@ export async function rematerialize() {
   for (const event of newEvents) {
     state.mirror = await applyMirrorEvent(state.mirror, event, lookup);
   }
+  for (const event of newEvents) {
+    if (event.payload?.type !== 'identity-cost') continue;
+    const { domain, signature, burnedLamports, slot } = event.payload;
+    const tx = { signature, err: null, incineratorBalanceDeltaLamports: burnedLamports, commitment: 'finalized', slot: slot ?? null };
+    const result = registerIdentityCost(state.identityCost, { domain, tx });
+    if (result.accepted) state.identityCost = result.state;
+  }
   for (const event of newEvents) coveredEventIds.add(event.id);
-  state.identityCost = deriveIdentityCostState(state.dag);
   await refreshCausalTick();
   refreshPendingGenerousSends();
   refreshSentGenerousSends();
+  refreshPendingMatchCommitments();
   notify();
   maybeSnapshot();
 }
@@ -136,7 +146,41 @@ export async function applyIncremental(id, parents, payload) {
 // wallet.js's own source — as this reference app opts real contracts
 // in. Adding a future contract here, with its own real verifyPayout,
 // is the entire integration; wallet.js needs no further change.
-const CONTRACT_VERIFIERS = { 'aiwa-generous-transfer-v1': verifyPayout };
+//
+// Registration itself demands real proof, not just a trusted-looking
+// name — verified concretely (§15.1's own real, demonstrated risk): a
+// valid signature alone only ever proves "signed by this key, over
+// this exact content," never "this is really the trusted module it
+// claims to be." Each real contract's own currently-deployed source
+// is fetched and independently re-hashed against a real, pinned
+// value right here — a real mismatch refuses that one registration
+// outright (logged, never silently dropped) rather than trusting a
+// name. This is real, active defense — not deferred until some
+// future feature might one day accept third-party contracts; the
+// discipline exists correctly from the very first contract onward.
+const PINNED_CONTRACT_HASHES = {
+  'aiwa-generous-transfer-v1': 'dd0948f25fe714dcc3f269b78a546e49f2dff459cf9f927477c1f4cf96f6a77a',
+  'aiwa-matching-v1': '946f2d93701a8540571287072510167785451c4d9eeec213af54e58cd3837dd5',
+};
+
+async function buildVerifiedContractRegistry() {
+  let registry = {};
+  const candidates = [
+    { contractId: 'aiwa-generous-transfer-v1', path: '../core/generous-transfer.js', verifyPayoutFn: verifyPayout },
+    { contractId: 'aiwa-matching-v1', path: '../core/matching-contract.js', verifyPayoutFn: verifyMatchPayout },
+  ];
+  for (const { contractId, path, verifyPayoutFn } of candidates) {
+    try {
+      const sourceCode = await fetch(new URL(path, import.meta.url)).then((r) => r.text());
+      registry = await registerVerifiedContract(registry, { contractId, sourceCode, expectedHash: PINNED_CONTRACT_HASHES[contractId], verifyPayoutFn });
+    } catch (err) {
+      console.error(`Real contract verification failed for '${contractId}' — refusing to register it:`, err);
+    }
+  }
+  return registry;
+}
+
+let CONTRACT_VERIFIERS = {};
 
 // A real generous-send-offer event, addressed to this domain, is
 // "pending" until this domain's own progression genuinely includes
@@ -172,6 +216,16 @@ export function refreshPendingGenerousSends() {
   state.pendingGenerousSends = scanForPendingGenerousSends(state.dag.topoOrder(), state.domainId);
 }
 
+// Real match-commitment events genuinely stay pending regardless of
+// which domain happens to be active — they're not addressed to a
+// specific recipient, only to a real, wrapped offer id — so this,
+// unlike the others above, doesn't need a real domainId to run.
+export function refreshPendingMatchCommitments() {
+  if (!state.dag) return;
+  const events = state.dag.topoOrder();
+  state.pendingMatchCommitments = scanPendingMatchCommitments(events, scanResolvedOfferIds(events));
+}
+
 // Saves a real snapshot at most every 5 real seconds — bounded
 // catch-up backlog regardless of how many times the tab gets reloaded
 // in between, unlike a pure event counter that resets on every load.
@@ -179,7 +233,7 @@ function maybeSnapshot() {
   const now = Date.now();
   if (now - lastSnapshotAt < SNAPSHOT_INTERVAL_MS) return;
   lastSnapshotAt = now;
-  saveSnapshot([...coveredEventIds], state.wallet, state.mirror).catch((err) => console.error('Snapshot save failed:', err));
+  saveSnapshot([...coveredEventIds], state.wallet, state.mirror, state.identityCost).catch((err) => console.error('Snapshot save failed:', err));
 }
 
 let progressionLoopRunning = false;
@@ -214,16 +268,11 @@ async function progressionLoop() {
       const offer = state.pendingGenerousSends[offerId];
       delete state.pendingGenerousSends[offerId]; // this real offer's one, real chance is now spent, win or lose
       let won = false;
+      const wrappedProof = { commitment: offer.commitment, generousSendEventId: offerId, qualifyingEpochEvent: { id: newId, parents: [lastId, ...includedOfferIds], payload }, priorVdfOutput: previousOutput };
       try {
-        const payoutFields = await verifyPayout({
-          ...offer.preSignedTransfer,
-          commitment: offer.commitment,
-          generousSendEventId: offerId,
-          qualifyingEpochEvent: { id: newId, parents: [lastId, ...includedOfferIds], payload },
-          priorVdfOutput: previousOutput,
-        });
+        const payoutFields = await verifyPayout({ ...offer.preSignedTransfer, ...wrappedProof });
         if (payoutFields) {
-          const payoutPayload = { type: 'contract-payout', contractId: offer.commitment.contractId, ...payoutFields, commitment: offer.commitment, generousSendEventId: offerId, qualifyingEpochEvent: { id: newId, parents: [lastId, ...includedOfferIds], payload }, priorVdfOutput: previousOutput };
+          const payoutPayload = { type: 'contract-payout', contractId: offer.commitment.contractId, ...payoutFields, ...wrappedProof };
           const payoutId = await state.dag.addEvent([newId], payoutPayload);
           await applyIncremental(payoutId, [newId], payoutPayload);
           won = true;
@@ -232,6 +281,26 @@ async function progressionLoop() {
         console.error('Real error resolving a generous-send offer — treated as a real loss, never silently retried:', err);
       }
       state.generousSendHistory = [{ offerId, from: offer.commitment.signerPubkey, bonusAmount: offer.commitment.bonusAmount, won, resolvedAt: Date.now() }, ...state.generousSendHistory].slice(0, 50);
+
+      // A real, third-party matching-contract.js commitment (§15.1's
+      // own real, verified composition) resolves at the identical,
+      // real moment its own wrapped offer does — reusing the exact,
+      // same wrappedProof just computed above, never a separate,
+      // re-derived one.
+      const matches = state.pendingMatchCommitments[offerId] ?? [];
+      delete state.pendingMatchCommitments[offerId];
+      for (const matchEvent of matches) {
+        try {
+          const matchPayoutFields = await verifyMatchPayout({ ...matchEvent.preSignedTransfer, matchCommitment: matchEvent.matchCommitment, wrappedProof });
+          if (matchPayoutFields) {
+            const matchPayoutPayload = { type: 'contract-payout', contractId: matchEvent.matchCommitment.contractId, ...matchPayoutFields, matchCommitment: matchEvent.matchCommitment, wrappedProof };
+            const matchPayoutId = await state.dag.addEvent([newId], matchPayoutPayload);
+            await applyIncremental(matchPayoutId, [newId], matchPayoutPayload);
+          }
+        } catch (err) {
+          console.error('Real error resolving a match-commitment — treated as a real loss, never silently retried:', err);
+        }
+      }
     }
     notify();
   }
@@ -254,6 +323,10 @@ export function render() {
 
 async function boot() {
   lastSnapshotAt = Date.now(); // avoids an immediate, redundant re-save of what boot() itself just loaded
+  // Real, verified before anything that could ever need it — every
+  // materialization below (both here and in rematerialize()) reads
+  // this same, real, module-level registry.
+  CONTRACT_VERIFIERS = await buildVerifiedContractRegistry();
   const root = document.getElementById('app');
   const showProgress = (done, total, label) => {
     const pct = total > 0 ? Math.round((done / total) * 100) : 100;
@@ -301,6 +374,14 @@ async function boot() {
           notify();
         }
       }
+      if (event.payload?.type === 'match-commitment') {
+        const wrappedId = event.payload?.matchCommitment?.wrappedGenerousSendEventId;
+        if (wrappedId) {
+          const existing = state.pendingMatchCommitments[wrappedId] ?? [];
+          state.pendingMatchCommitments = { ...state.pendingMatchCommitments, [wrappedId]: [...existing, { id: event.id, ...event.payload }] };
+          notify();
+        }
+      }
     });
     state.genesisId = await state.dag.addEvent([], { type: 'genesis' });
     state.lastEventId = state.genesisId;
@@ -312,25 +393,30 @@ async function boot() {
     const snapshot = await loadSnapshot();
     let base = initialWalletState();
     let mirrorBase = initialMirrorState();
+    let identityCostBase = initialIdentityCostState();
     let remaining = events;
-    // A real, older snapshot (before Mirror joined this mechanism,
-    // §12.1) has no real `mirror` field — its own `coveredEventIds`
-    // is real and trustworthy for wallet, but Mirror still needs one
+    // A real, older snapshot (before Mirror, then identity-cost,
+    // joined this mechanism, §12.1) has no real `mirror` (or
+    // `identityCost`) field — its own `coveredEventIds` is real and
+    // trustworthy for wallet, but each missing part still needs one
     // real, one-time full catch-up in that specific case, tracked
-    // separately so wallet's own incremental fast path is never
-    // held back by it.
+    // separately so wallet's own incremental fast path is never held
+    // back by either.
     const mirrorNeedsFullCatchUp = snapshot && snapshot.mirror === undefined;
+    const identityCostNeedsFullCatchUp = snapshot && snapshot.identityCost === undefined;
     if (snapshot) {
       base = snapshot.wallet;
       remaining = events.filter((e) => !snapshot.coveredEventIds.has(e.id));
       coveredEventIds = new Set(snapshot.coveredEventIds);
       if (!mirrorNeedsFullCatchUp) mirrorBase = snapshot.mirror;
+      if (!identityCostNeedsFullCatchUp) identityCostBase = snapshot.identityCost;
     }
     const mirrorRemaining = mirrorNeedsFullCatchUp ? events : remaining;
+    const identityCostRemaining = identityCostNeedsFullCatchUp ? events : remaining;
 
-    if (remaining.length > 0 || mirrorRemaining.length > 0) {
+    if (remaining.length > 0 || mirrorRemaining.length > 0 || identityCostRemaining.length > 0) {
       const label = snapshot ? 'Catching up since last snapshot\u2026' : 'Verifying real, historical progression\u2026';
-      const totalWork = Math.max(remaining.length, mirrorRemaining.length);
+      const totalWork = Math.max(remaining.length, mirrorRemaining.length, identityCostRemaining.length);
       showProgress(0, totalWork, label);
       const lookup = deriveSourceEpochLookup(events);
       for (let i = 0; i < remaining.length; i++) {
@@ -338,12 +424,19 @@ async function boot() {
         // this backlog runs on the same dedicated worker thread as
         // the ongoing loop — a real, possibly large one-time catch-up
         // must never compete with rendering or input handling either.
-        base = await applyWalletEvent(REWARD_PARAMS, base, remaining[i], verifyVdfOnWorker);
+        base = await applyWalletEvent(REWARD_PARAMS, base, remaining[i], verifyVdfOnWorker, CONTRACT_VERIFIERS);
         coveredEventIds.add(remaining[i].id);
         if (i % 20 === 0) showProgress(i + 1, totalWork, label);
       }
       for (const event of mirrorRemaining) {
         mirrorBase = await applyMirrorEvent(mirrorBase, event, lookup);
+      }
+      for (const event of identityCostRemaining) {
+        if (event.payload?.type !== 'identity-cost') continue;
+        const { domain, signature, burnedLamports, slot } = event.payload;
+        const tx = { signature, err: null, incineratorBalanceDeltaLamports: burnedLamports, commitment: 'finalized', slot: slot ?? null };
+        const result = registerIdentityCost(identityCostBase, { domain, tx });
+        if (result.accepted) identityCostBase = result.state;
       }
       // A real, unconditional save right here — the 5-second interval
       // gate exists to avoid excessive writes during the ONGOING
@@ -353,14 +446,15 @@ async function boot() {
       // than the interval means no new snapshot is ever saved between
       // reloads — a real, closed gap, not a hypothetical one: exactly
       // what let a real backlog grow across many real test sessions.
-      await saveSnapshot([...coveredEventIds], base, mirrorBase).catch((err) => console.error('Post-catch-up snapshot save failed:', err));
+      await saveSnapshot([...coveredEventIds], base, mirrorBase, identityCostBase).catch((err) => console.error('Post-catch-up snapshot save failed:', err));
       lastSnapshotAt = Date.now();
     }
     state.wallet = base;
     state.mirror = mirrorBase;
+    state.identityCost = identityCostBase;
 
-    state.identityCost = deriveIdentityCostState(state.dag);
     await refreshCausalTick();
+    refreshPendingMatchCommitments();
     notify();
 
     // A real offer arrived via a scanned QR's own URL — pre-fill the

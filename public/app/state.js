@@ -39,6 +39,11 @@ export const state = {
   // rate — never a clock, purely this domain's own repeated
   // observation of the same real target's own real epoch.
   rateWitnesses: {},
+  // Real, still-pending matching-contract.js commitments (§15.1),
+  // grouped by the real, wrapped offer id they reference — resolved
+  // at the exact, same real moment the wrapped offer itself is,
+  // never separately or on a different schedule.
+  pendingMatchCommitments: {},
 };
 
 export const REWARD_PARAMS = { alpha: 1.1, beta: 2.2, gamma: 3, C: Math.pow(33, 3), minQ: 1 };

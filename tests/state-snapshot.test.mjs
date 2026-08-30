@@ -103,3 +103,55 @@ test('loadSnapshot returns null, never throws, when no real snapshot exists yet'
     cleanup();
   }
 });
+
+test('THE REAL ROUND-TRIP PROPERTY, EXTENDED: a real identityCost, saved alongside wallet and mirror, comes back byte-identical too', async () => {
+  const cleanup = installMockIndexedDB();
+  try {
+    const { saveSnapshot, loadSnapshot } = await import('../public/app/state-snapshot.js?t=' + (Date.now() + 3));
+    const wallet = { accrual: { positions: { alice: 100n } } };
+    const mirror = { commitments: { bob: [{ epoch: 5 }] } };
+    const identityCost = { registered: { alice: { domain: 'alice', burnedLamports: 1000000 } }, usedSignatures: { sig1: true } };
+    await saveSnapshot(['e1'], wallet, mirror, identityCost);
+    const loaded = await loadSnapshot();
+    assert.deepEqual(loaded.identityCost, identityCost);
+  } finally {
+    cleanup();
+  }
+});
+
+test('SECURITY, THE REAL SECOND-TIER BACKWARD-COMPATIBILITY PROPERTY: a real, mirror-only snapshot (before identity-cost joined this mechanism) reports identityCost as genuinely unknown, never an empty state', async () => {
+  const cleanup = installMockIndexedDB();
+  try {
+    const { saveSnapshot, loadSnapshot } = await import('../public/app/state-snapshot.js?t=' + (Date.now() + 4));
+    // Simulate the real, PREVIOUS version of this file's own real
+    // save shape — wallet + mirror, no real identityCost field yet.
+    const wallet = { accrual: { positions: { alice: 5n } } };
+    const mirror = { commitments: {} };
+    globalThis.indexedDB.open = (name) => {
+      const request = {};
+      queueMicrotask(() => {
+        request.result = {
+          transaction: () => ({
+            objectStore: () => ({
+              get: (key) => {
+                const req = {};
+                queueMicrotask(() => {
+                  req.result = { coveredEventIds: ['e1'], state: JSON.stringify({ wallet, mirror }, (k, v) => typeof v === 'bigint' ? `__bigint__:${v}` : v), savedAt: 123 };
+                  req.onsuccess?.();
+                });
+                return req;
+              },
+            }),
+          }),
+        };
+        request.onsuccess?.();
+      });
+      return request;
+    };
+    const loaded = await loadSnapshot();
+    assert.notEqual(loaded.mirror, undefined, 'the real, already-present mirror data must still load correctly');
+    assert.equal(loaded.identityCost, undefined, 'a real, mirror-only (pre-identity-cost) snapshot must report identityCost as genuinely unknown, never silently treated as empty');
+  } finally {
+    cleanup();
+  }
+});

@@ -119,3 +119,34 @@ test('an explicit minLamports floor and a churn curve compose — the higher app
   });
   assert.equal(result.accepted, false, 'the explicit 9999 floor exceeds both the burn and the curve');
 });
+
+test('THE REAL INCREMENTAL CATCH-UP PROPERTY, verified for app.js\'s own rematerialize()/boot() fix (§12.1): applying only newly-arrived identity-cost events on top of already-materialized state produces byte-identical results to a full replay from scratch', async () => {
+  const { EventDag } = await import('../public/core/event-dag.js');
+  const { deriveIdentityCostState } = await import('../public/app/identity-cost-view.js');
+
+  const dag = new EventDag();
+  const genesisId = await dag.addEvent([], { type: 'genesis' });
+  await dag.addEvent([], { type: 'identity-cost', domain: 'alice', signature: 'sig1', burnedLamports: 1000000, slot: 100 });
+  await dag.addEvent([], { type: 'identity-cost', domain: 'bob', signature: 'sig2', burnedLamports: 2000000, slot: 200 });
+
+  const fullReplay = deriveIdentityCostState(dag);
+
+  // A real, deliberate mistake to guard against: `topoOrder()`
+  // itself sorts causally-independent events by their own real,
+  // content-addressed id — never insertion order — so a real,
+  // correct `coveredEventIds` must reference the real genesis id
+  // itself, never assume it's simply the first element.
+  const events = dag.topoOrder();
+  const coveredIds = new Set([genesisId]);
+  let s = initialIdentityCostState();
+  for (const ev of events) {
+    if (coveredIds.has(ev.id)) continue;
+    if (ev.payload?.type !== 'identity-cost') continue;
+    const { domain, signature, burnedLamports, slot } = ev.payload;
+    const realTx = { signature, err: null, incineratorBalanceDeltaLamports: burnedLamports, commitment: 'finalized', slot: slot ?? null };
+    const result = registerIdentityCost(s, { domain, tx: realTx });
+    if (result.accepted) s = result.state;
+  }
+
+  assert.deepEqual(fullReplay, s, 'a real, partial-then-incremental catch-up must produce an identical real identity-cost state to a full replay');
+});

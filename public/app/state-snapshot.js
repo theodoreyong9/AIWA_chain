@@ -59,9 +59,9 @@ function openDb() {
   });
 }
 
-export async function saveSnapshot(coveredEventIds, wallet, mirror) {
+export async function saveSnapshot(coveredEventIds, wallet, mirror, identityCost) {
   const db = await openDb();
-  const serialized = JSON.stringify({ wallet, mirror }, replacer);
+  const serialized = JSON.stringify({ wallet, mirror, identityCost }, replacer);
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, 'readwrite');
     tx.objectStore(STORE_NAME).put({ coveredEventIds, state: serialized, savedAt: Date.now() }, SNAPSHOT_KEY);
@@ -73,11 +73,12 @@ export async function saveSnapshot(coveredEventIds, wallet, mirror) {
 // Returns null on any real absence or mismatch — a missing or
 // unreadable snapshot is never an error, only a real, honest signal
 // to fall back to full materialization. A real, older snapshot saved
-// before Mirror joined this mechanism has no real `mirror` field —
-// `mirror` comes back `undefined` in that case, a real, honest signal
-// for the caller to fall back to a full Mirror replay just this once,
-// never silently treated as an empty (rather than unknown) Mirror
-// state.
+// before Mirror (then later identity-cost) joined this mechanism has
+// no real `mirror` (or `identityCost`) field — each comes back
+// `undefined` in that specific case, a real, honest signal for the
+// caller to fall back to one, real, final full replay for exactly
+// that part, never silently treated as an empty (rather than
+// genuinely unknown) state.
 export async function loadSnapshot() {
   try {
     const db = await openDb();
@@ -98,6 +99,7 @@ export async function loadSnapshot() {
       coveredEventIds: new Set(record.coveredEventIds),
       wallet: isLegacyWalletOnly ? parsed : parsed.wallet,
       mirror: isLegacyWalletOnly ? undefined : parsed.mirror,
+      identityCost: isLegacyWalletOnly ? undefined : parsed.identityCost,
     };
   } catch {
     return null;

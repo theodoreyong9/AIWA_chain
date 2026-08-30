@@ -47,7 +47,7 @@ function startAutoRefresh() {
 export function renderIgnition(root) {
   if (!state.domainId) {
     root.innerHTML = `
-      <div class="top-bar"><div style="display:flex; align-items:center; gap:10px"><div class="wordmark">AIWA <em>chain</em></div><a href="https://github.com/theodoreyong9/AIWA_chain" target="_blank" rel="noopener" class="gh-link" title="View source on GitHub">GitHub</a><a href="YELLOWPAPER.pdf" target="_blank" class="gh-link" title="Read the Yellow Paper (PDF)">Yellow Paper</a></div></div>
+      <div class="top-bar"><div style="display:flex; align-items:center; gap:10px"><div class="wordmark">AIWA <em>chain</em></div><a href="https://github.com/theodoreyong9/AIWA_chain" target="_blank" rel="noopener" class="gh-link" title="View source on GitHub">GitHub</a><a href="YELLOWPAPER.pdf" target="_blank" class="gh-link" title="Read the Yellow Paper (PDF)">Yellow Paper</a><a href="https://github.com/theodoreyong9/AIWA_chain/blob/main/docs/WRITING-A-CONTRACT.md" target="_blank" rel="noopener" class="gh-link" title="Real guide for writing your own contract">Contract Guide</a></div></div>
       <div class="tabs">
         <div class="tab" data-tab="continuum">Continuum</div>
         <div class="tab" data-tab="mirror">Mirror</div>
@@ -72,7 +72,7 @@ export function renderIgnition(root) {
 
   root.innerHTML = `
     <div class="top-bar">
-      <div style="display:flex; align-items:center; gap:10px"><div class="wordmark">AIWA <em>chain</em></div><a href="https://github.com/theodoreyong9/AIWA_chain" target="_blank" rel="noopener" class="gh-link" title="View source on GitHub">GitHub</a><a href="YELLOWPAPER.pdf" target="_blank" class="gh-link" title="Read the Yellow Paper (PDF)">Yellow Paper</a></div>
+      <div style="display:flex; align-items:center; gap:10px"><div class="wordmark">AIWA <em>chain</em></div><a href="https://github.com/theodoreyong9/AIWA_chain" target="_blank" rel="noopener" class="gh-link" title="View source on GitHub">GitHub</a><a href="YELLOWPAPER.pdf" target="_blank" class="gh-link" title="Read the Yellow Paper (PDF)">Yellow Paper</a><a href="https://github.com/theodoreyong9/AIWA_chain/blob/main/docs/WRITING-A-CONTRACT.md" target="_blank" rel="noopener" class="gh-link" title="Real guide for writing your own contract">Contract Guide</a></div>
       <div style="display:flex; align-items:center; gap:8px">
         <div class="address-chip" id="addr-copy" title="Click to copy">${short(state.keypair.publicKey.toBase58(), 10)}</div>
         <button class="ghost" id="disconnect-btn" style="padding:5px 10px; font-size:11px">Disconnect</button>

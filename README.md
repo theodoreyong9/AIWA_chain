@@ -8,7 +8,7 @@ Live: https://theodoreyong9.github.io/AIWA_chain/
 
 A focused reference implementation of the AIWA protocol (see `docs/YELLOWPAPER.md`): identity, a real sequential-delay progression mechanism, an accrual formula, conservation of transferred value, a real Mirror/reception layer, and a real weighted Causal Tick — composed into two wallets, not a general-purpose platform. No modules, no plugin registry, no pools. That scope was deliberately cut to get this part right first.
 
-301 real tests, security-relevant cases named as such — all but one run unconditionally; the real cross-runtime check skips gracefully, never fails, if no Rust toolchain is available.
+319 real tests, security-relevant cases named as such — all but one run unconditionally; the real cross-runtime check skips gracefully, never fails, if no Rust toolchain is available.
 
 ## The design principle this whole project is built around
 
@@ -27,6 +27,10 @@ cd docs && pdflatex YELLOWPAPER.tex && pdflatex YELLOWPAPER.tex && cp YELLOWPAPE
 ```
 
 (twice, so LaTeX's own cross-references resolve correctly — the first pass leaves them as `??`).
+
+## Writing your own contract
+
+`docs/WRITING-A-CONTRACT.md` — a real, concrete guide, not abstract advice. Every rule in it comes from something either verified concretely while building `generous-transfer.js`, or from a real, specific vulnerability found and closed along the way — including two real attacks (a free-preview grinding attack, and a fabricated-VDF-output attack) discovered and closed before ever being shipped. Start there before writing a new one.
 
 ## Architecture
 
@@ -112,7 +116,11 @@ Nothing here happens automatically, on any timer, or just because two devices ar
 
 ## Real, verified cross-runtime interoperability
 
-`interop/rust-vdf/` is a real, independent Rust implementation of a real, growing set of this protocol's own core computations — the sequential VDF chain, domain-id derivation, event canonicalization (§3.1), generous-transfer's own deterministic outcome (§15), the weighted median (§13), Conservation's own split invariant (§9, real 18-decimal amounts), Mirror's own reception monotonicity (§4), and relative-rate's own central ratio (§14) — each written from the same specification, never by wrapping or transpiling the JS. `tests/rust-interop.test.mjs` builds it, runs it, and compares its real output against the real JS module's own output, byte for byte, for every one of these. This is what makes "the runtime never enters into the value" a real, checked property, not an assertion — see `interop/rust-vdf/README.md` for exactly what this does and does not claim. Signature verification itself (Ed25519) is deliberately left to each ecosystem's own standard library rather than reimplemented — the real, checked risk here is silent divergence in this project's *own custom logic*, not in an already-standardized primitive.
+`interop/rust-vdf/` is a real, independent Rust implementation of a real, growing set of this protocol's own core computations — the sequential VDF chain, domain-id derivation, event canonicalization (§3.1), generous-transfer's own deterministic outcome (§15), the weighted median (§13), Conservation's own split invariant (§9, real 18-decimal amounts), Mirror's own reception monotonicity (§4), relative-rate's own central ratio (§14), Causal Tick's own consistency check (§13), the real, *practical* Wesolowski verification (§6.1, including real prime-derivation and Miller-Rabin primality testing — the one path an external, gas-constrained chain would genuinely use, never the raw symmetric chain), and Ed25519 signature verification (checked against a real, independent library, `ed25519-dalek`, never the real JS one this project actually uses) — each written from the same specification, never by wrapping or transpiling the JS. `tests/rust-interop.test.mjs` builds it, runs it, and compares its real output against the real JS module's own output, byte for byte, for every one of these. This is what makes "the runtime never enters into the value" a real, checked property, not an assertion — see `interop/rust-vdf/README.md` for exactly what this does and does not claim.
+
+**This is also the concrete confirmation behind §16.1's own "native interchain" claim.** Every real primitive an external chain's own adapter would actually need — canonicalization, the cheap VDF proof, and now signatures — is confirmed genuinely portable outside JS, using genuinely different, independent libraries. Not an adapter itself, and no specific target chain has been chosen — that remains real, separate, future work for whoever builds it, on their own terms.
+
+**Considered and deliberately not extended further, honestly.** `matching-contract.js` and `registerVerifiedContract` were considered for the same treatment — found, on inspection, to be real orchestration over already-verified primitives (Ed25519 signature checks, `resolveGenerousSend`'s own already-covered outcome logic, SHA-256 hashing) rather than new mathematical or cryptographic computation of their own. Reimplementing them in Rust would mostly re-verify functions already independently checked above, adding little real marginal coverage.
 
 ## Running locally
 

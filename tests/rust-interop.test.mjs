@@ -7,6 +7,9 @@ import { fileURLToPath } from 'node:url';
 import { computeVdfChain, vdfSeed } from '../public/core/vdf.js';
 import { deriveDomainId } from '../public/core/domain-id.js';
 import { EventDag } from '../public/core/event-dag.js';
+import { checkCausalConsistency } from '../public/core/causal-tick.js';
+import { evaluate, verify as verifyWesolowski } from '../public/core/wesolowski-vdf.js';
+import { ed25519 } from '@noble/curves/ed25519.js';
 import { computeOutcomeHash, checkOutcome } from '../public/core/generous-transfer.js';
 import { weightedMedian } from '../public/core/weighted-median.js';
 
@@ -117,4 +120,52 @@ test('THE REAL CROSS-RUNTIME PROPERTY: an independent Rust implementation produc
   const targetDelta = 481 - 100;
   const ratio = targetDelta / observerDelta;
   assert.equal(rustOutput.ratio, ratio, 'a real, non-integer relative-rate ratio must match exactly across runtimes, down to the last real floating-point digit');
+
+  // §13's own real consistency check — the one genuinely new, custom
+  // piece of logic in the full Causal Tick flow.
+  const consistentResult = checkCausalConsistency(100, { tick: 95 }, 10);
+  const inconsistentResult = checkCausalConsistency(100, { tick: 50 }, 10);
+  assert.equal(rustOutput.consistentCase, consistentResult.consistent);
+  assert.equal(rustOutput.consistentGap, consistentResult.gap);
+  assert.equal(rustOutput.inconsistentCase, inconsistentResult.consistent);
+  assert.equal(rustOutput.inconsistentGap, inconsistentResult.gap);
+
+  // §6.1's own real, PRACTICAL Wesolowski verification — the one
+  // path a real, external, gas-constrained chain would actually use
+  // (never the raw, symmetric hash chain, prohibitively expensive to
+  // redo). Confirms this project's own "native interchain" claim
+  // (§16.1) concretely, not by assertion: the real, complete
+  // verification algorithm — including real prime-derivation and
+  // Miller-Rabin primality testing — is genuinely, faithfully
+  // reproducible outside JS.
+  const x = 123456789n;
+  const iterations = 50;
+  const y = evaluate(x, iterations);
+  const proof = { pi: 1n, l: 182976577130776636739865532488529097497n };
+  const jsValid = await verifyWesolowski(x, iterations, y, proof);
+  const jsInvalid = await verifyWesolowski(x, iterations, y + 1n, proof);
+  assert.equal(jsValid, true, 'sanity: the real, known-good test vector must verify in JS itself first');
+  assert.equal(rustOutput.wesolowskiValid, jsValid, 'a real, valid Wesolowski proof must verify identically across runtimes');
+  assert.equal(rustOutput.wesolowskiInvalid, jsInvalid, 'a real, tampered y must be rejected identically across runtimes');
+
+  // The final, real piece for §16.1's own "native interchain" claim
+  // — a real signature, produced by the real JS library
+  // (@noble/curves) this project actually uses, independently
+  // verified by a genuinely different real library (ed25519-dalek),
+  // never the same one — confirming the algorithm itself, not one
+  // particular implementation, is what a real signature depends on.
+  function toHex(bytes) { return Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join(''); }
+  const edPubkeyHex = 'bd625af599e22fdfd30a9b76600abe5beb36571854d0532cda94f67724069485';
+  const edMessage = new TextEncoder().encode('{"contractId":"aiwa-generous-transfer-v1","to":"bob"}');
+  const edSignatureHex = '23b5759273caddaf0f4d7e40912061f1e0f2c163c19181a76d30187721e6f198bebbe1c4ee0558b477ea26fd516eafdc521876c5d61efe8d17502cb1035c8e06';
+  const jsEdValid = ed25519.verify(hexToBytesLocal(edSignatureHex), edMessage, hexToBytesLocal(edPubkeyHex));
+  assert.equal(jsEdValid, true, 'sanity: the real, known-good Ed25519 test vector must verify in JS itself first');
+  assert.equal(rustOutput.ed25519Valid, true, 'a real signature, produced by the real JS library this project uses, must verify under a genuinely different, independent real Rust library');
+  assert.equal(rustOutput.ed25519Invalid, false, 'a real, tampered message must be rejected identically — the real signature was never over this content');
 });
+
+function hexToBytesLocal(hex) {
+  const out = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  return out;
+}
