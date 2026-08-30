@@ -153,3 +153,18 @@ test('materializeProgression also accepts and genuinely uses a custom verifyFn',
   assert.equal(calls, 2);
   assert.equal(state.domains.d.epoch, 2);
 });
+
+test('SECURITY, THE REAL REGRESSION FOUND AND CLOSED: an explicit null verifyFn (never the same as omitting the argument) falls back to real, full VDF verification, instead of crashing — found while checking real scalability, app.js\'s own rematerialize() called this with a literal null on every real external sync', async () => {
+  const p1 = await progressionPayload('d', 1);
+  const events = [{ id: 'e1', parents: [], payload: p1 }];
+  const state = await applyProgressionEvent(initialProgressionState(), events[0], null);
+  assert.equal(state.domains.d.epoch, 1, 'a real, valid progression event must still be accepted with an explicit null verifyFn, never crash');
+  assert.equal(state.rejections.length, 0);
+});
+
+test('SECURITY: with an explicit null verifyFn, a real, invalid VDF proof is still genuinely rejected — the fallback is real verification, never a silent bypass', async () => {
+  const fake = { type: 'progression', domain: 'd', epoch: 1, vdfIterations: 30, vdfOutput: 'fabricated-never-computed' };
+  const state = await applyProgressionEvent(initialProgressionState(), { id: 'e1', parents: [], payload: fake }, null);
+  assert.equal(state.rejections.length, 1);
+  assert.match(state.rejections[0].reason, /VDF proof does not verify/);
+});

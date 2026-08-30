@@ -60,7 +60,7 @@ valid only if causally chained to $D$'s own last accepted transition and carryin
 
 $$h_0 = \mathrm{SHA\text{-}256}(\mathrm{seed}), \qquad h_i = \mathrm{SHA\text{-}256}(h_{i-1})$$
 
-seeded from $(\mathrm{domain}, \mathrm{output}_{n-1})$. Symmetric — verification cost equals production cost — unlike an asymmetric VDF (Wesolowski, Pietrzak); what is unconditional is that production cannot be parallelized or shortcut by any amount of hardware.
+seeded from $(\mathrm{domain}, \mathrm{output}_{n-1})$. Symmetric — verification cost equals production cost — unlike an asymmetric VDF (Wesolowski, Pietrzak); what is unconditional is that the chain imposes $\mathrm{VDF\_ITERATIONS}$ genuinely dependent, sequential steps — no amount of hardware lets a later step be computed before an earlier one. How much *real time* those steps take is not unconditional: real, independent SHA-256 benchmarks show roughly a 2–4$\times$ spread between common hardware with and without dedicated SHA acceleration (Intel/AMD SHA-NI, ARM's own SHA2 extensions) — a real, bounded, measured gap, never claimed to be hardware-invariant, and structurally far smaller than a parallelizable proof-of-work's own gap precisely because sequentiality (above) rules out scaling by adding more hardware in parallel.
 
 **Locality.** Computation of $h_i$ occurs on exactly one real device at a time — never distributed, never assisted by other domains. Mirror and live sync (§4, §13) carry only already-computed results. Identity is the keypair (§13.1); the computing device may change without discontinuity in $\mathrm{epoch}_D$.
 
@@ -142,6 +142,22 @@ AIWA removes value creation from any consensus chain: $\mathrm{epoch}_D$ require
 ## 12. Explicit non-claims
 
 Not solved: the human-identity oracle, physical-location verification, absolute global time, Byzantine agreement without assumptions, detection of every coalition of identities under one real actor. A coalition can produce internally consistent history at real cost. The claim is narrower: fabricated identities cannot fabricate authenticated history *for free*.
+
+### 12.1 Scalability — real, unaddressed limits
+
+Cross-domain, this scales well by construction — no consensus, no shared bottleneck; verified structurally, not merely asserted (§1). *Within* a single domain, three real costs grow unboundedly and are not yet addressed:
+
+**Local storage.** At $\mathrm{VDF\_ITERATIONS} = 12000$ ($\sim$280ms/epoch, §6), a continuously-running domain produces on the order of $10^8$ real progression events per real year — roughly 28GB at a real, conservative $\sim$250 bytes/event, for one domain alone.
+
+**Wallet materialization, now incremental.** `rematerialize()`'s own wallet update — the real, VDF-verification-heavy part — now applies only genuinely new events (tracked by the reference application's own `coveredEventIds`) on top of already-materialized state, instead of replaying from scratch. Verified concretely: applying only new events on top of existing state produces byte-identical results to a full replay, for real, causally-independent domains.
+
+**Mirror, now incremental on both real sync and real boot.** The identical, real fix applied to wallet materialization above, verified the same way (byte-identical to a full replay). `state-snapshot.js`'s own real snapshot — previously wallet-only — now covers Mirror too, saved and loaded together, keyed by the identical real `coveredEventIds`. A real, older, wallet-only snapshot is recognized explicitly (never silently misread as an empty Mirror state) and triggers one real, final full Mirror catch-up before the new, combined snapshot takes over — verified concretely, including a real bigint round trip and the real legacy-format detection itself.
+
+**Identity-cost, still a full replay.** Cheaper per-event (no VDF verification), but still $O(\text{total real history})$ on every real sync and every real boot — real, remaining, unaddressed cost.
+
+**Unbounded full-sync payload.** `sync-protocol.js`'s own real full-sync sends the entire real event list as one message on connect — for a domain with a real, large history, this payload grows without bound, with no real, tested ceiling on what a real transport can carry.
+
+None of these are addressed yet — real, open engineering work, not a solved problem being merely under-documented.
 
 ## 13. Causal Tick
 
@@ -263,7 +279,7 @@ Every real event here is verifiable using only standard, non-proprietary primiti
 | Accrual position, t/A | `public/core/accrual.js` |
 | Genesis Commitment (§8) | `public/core/identity-cost.js`, `public/core/solana-wallet.js` |
 | Churn profitability check (§8) | `public/core/churn-analysis.js` — parameter-specific, not a general guarantee |
-| Cross-runtime interoperability | `interop/rust-vdf/` — independent Rust, byte-identical to JS output |
+| Cross-runtime interoperability | `interop/rust-vdf/` — independent Rust, byte-identical to JS output across VDF, domain-id, event canonicalization, generous-transfer outcomes, weighted median, Conservation split, Mirror monotonicity, and relative-rate |
 | Conservation (§9) | `public/core/conservation.js` |
 | Denomination (§10) | `public/core/units.js` |
 | Mirror (§4) | `public/core/mirror.js` |
@@ -275,4 +291,4 @@ Every real event here is verifiable using only standard, non-proprietary primiti
 | Live peer-to-peer sync | `public/core/p2p-signaling.js`, `public/app/sync-protocol.js`, `public/app/p2p-connection.js`, `public/app/trystero-connection.js` |
 | Coherent composition | `public/core/wallet.js` |
 
-294 tests; every case but the cross-runtime check runs unconditionally, which skips (never fails) without a Rust toolchain. Security-relevant cases are named as such in their own files.
+301 tests; every case but the cross-runtime check runs unconditionally, which skips (never fails) without a Rust toolchain. Security-relevant cases are named as such in their own files.

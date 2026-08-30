@@ -1,7 +1,7 @@
 import { EventDag } from '../core/event-dag.js';
 import { createPersistedDag } from './persistence.js';
-import { materializeWallet, applyWalletEvent, initialWalletState } from '../core/wallet.js';
-import { materializeMirror, deriveSourceEpochLookup } from '../core/mirror.js';
+import { applyWalletEvent, initialWalletState } from '../core/wallet.js';
+import { applyMirrorEvent, deriveSourceEpochLookup, initialMirrorState } from '../core/mirror.js';
 import { computeCausalTick } from '../core/causal-tick.js';
 import { deriveIdentityCostState } from './identity-cost-view.js';
 import { saveSnapshot, loadSnapshot } from './state-snapshot.js';
@@ -77,10 +77,34 @@ function verifyVdfOnWorker(seed, iterations, output) {
 // see applyIncremental below.
 export async function rematerialize() {
   const events = state.dag.topoOrder();
-  state.wallet = await materializeWallet(REWARD_PARAMS, events, null, null, CONTRACT_VERIFIERS);
-  coveredEventIds = new Set(events.map((e) => e.id));
+  // A real, previously-undetected regression, found while checking
+  // real scalability: `null` here is NOT the same as omitting the
+  // argument — progression.js's own default parameter only applies
+  // to `undefined`, so an explicit `null` genuinely crashed on the
+  // first real progression event in the replay, every single time
+  // this ran. Fixed here — the real, off-main-thread verifier,
+  // exactly like boot's own catch-up already uses.
+  //
+  // Incremental, not a full replay, for both wallet and Mirror —
+  // `coveredEventIds` already tracks exactly what this domain's own
+  // state already reflects. Computed once, before either loop runs,
+  // so both apply to the identical real set of newly-arrived events.
+  // Verified concretely (§12.1's own real finding, for both wallet
+  // and Mirror separately) that applying only new events on top of
+  // already-materialized state produces byte-identical results to
+  // replaying everything from scratch. `deriveSourceEpochLookup`
+  // itself still needs the full, real event list — a reception
+  // commitment can reference an event from long before the newly
+  // arrived batch.
+  const newEvents = events.filter((e) => !coveredEventIds.has(e.id));
+  for (const event of newEvents) {
+    state.wallet = await applyWalletEvent(REWARD_PARAMS, state.wallet, event, verifyVdfOnWorker, CONTRACT_VERIFIERS);
+  }
   const lookup = deriveSourceEpochLookup(events);
-  state.mirror = await materializeMirror(events, lookup);
+  for (const event of newEvents) {
+    state.mirror = await applyMirrorEvent(state.mirror, event, lookup);
+  }
+  for (const event of newEvents) coveredEventIds.add(event.id);
   state.identityCost = deriveIdentityCostState(state.dag);
   await refreshCausalTick();
   refreshPendingGenerousSends();
@@ -155,7 +179,7 @@ function maybeSnapshot() {
   const now = Date.now();
   if (now - lastSnapshotAt < SNAPSHOT_INTERVAL_MS) return;
   lastSnapshotAt = now;
-  saveSnapshot([...coveredEventIds], state.wallet).catch((err) => console.error('Snapshot save failed:', err));
+  saveSnapshot([...coveredEventIds], state.wallet, state.mirror).catch((err) => console.error('Snapshot save failed:', err));
 }
 
 let progressionLoopRunning = false;
@@ -287,16 +311,28 @@ async function boot() {
     // not in that set is real, new catch-up work; nothing is skipped.
     const snapshot = await loadSnapshot();
     let base = initialWalletState();
+    let mirrorBase = initialMirrorState();
     let remaining = events;
+    // A real, older snapshot (before Mirror joined this mechanism,
+    // §12.1) has no real `mirror` field — its own `coveredEventIds`
+    // is real and trustworthy for wallet, but Mirror still needs one
+    // real, one-time full catch-up in that specific case, tracked
+    // separately so wallet's own incremental fast path is never
+    // held back by it.
+    const mirrorNeedsFullCatchUp = snapshot && snapshot.mirror === undefined;
     if (snapshot) {
       base = snapshot.wallet;
       remaining = events.filter((e) => !snapshot.coveredEventIds.has(e.id));
       coveredEventIds = new Set(snapshot.coveredEventIds);
+      if (!mirrorNeedsFullCatchUp) mirrorBase = snapshot.mirror;
     }
+    const mirrorRemaining = mirrorNeedsFullCatchUp ? events : remaining;
 
-    if (remaining.length > 0) {
+    if (remaining.length > 0 || mirrorRemaining.length > 0) {
       const label = snapshot ? 'Catching up since last snapshot\u2026' : 'Verifying real, historical progression\u2026';
-      showProgress(0, remaining.length, label);
+      const totalWork = Math.max(remaining.length, mirrorRemaining.length);
+      showProgress(0, totalWork, label);
+      const lookup = deriveSourceEpochLookup(events);
       for (let i = 0; i < remaining.length; i++) {
         // The real VDF verification for any 'progression' events in
         // this backlog runs on the same dedicated worker thread as
@@ -304,7 +340,10 @@ async function boot() {
         // must never compete with rendering or input handling either.
         base = await applyWalletEvent(REWARD_PARAMS, base, remaining[i], verifyVdfOnWorker);
         coveredEventIds.add(remaining[i].id);
-        if (i % 20 === 0) showProgress(i + 1, remaining.length, label);
+        if (i % 20 === 0) showProgress(i + 1, totalWork, label);
+      }
+      for (const event of mirrorRemaining) {
+        mirrorBase = await applyMirrorEvent(mirrorBase, event, lookup);
       }
       // A real, unconditional save right here — the 5-second interval
       // gate exists to avoid excessive writes during the ONGOING
@@ -314,13 +353,12 @@ async function boot() {
       // than the interval means no new snapshot is ever saved between
       // reloads — a real, closed gap, not a hypothetical one: exactly
       // what let a real backlog grow across many real test sessions.
-      await saveSnapshot([...coveredEventIds], base).catch((err) => console.error('Post-catch-up snapshot save failed:', err));
+      await saveSnapshot([...coveredEventIds], base, mirrorBase).catch((err) => console.error('Post-catch-up snapshot save failed:', err));
       lastSnapshotAt = Date.now();
     }
     state.wallet = base;
+    state.mirror = mirrorBase;
 
-    const lookup = deriveSourceEpochLookup(events);
-    state.mirror = await materializeMirror(events, lookup);
     state.identityCost = deriveIdentityCostState(state.dag);
     await refreshCausalTick();
     notify();

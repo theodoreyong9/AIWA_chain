@@ -1,11 +1,20 @@
 # rust-vdf — a real cross-runtime interoperability demonstration
 
-Not a port of AIWA Chain to Rust — a single, focused, independent
-implementation of the protocol's own canonical core (the sequential
-VDF hash chain from `vdf.js`, domain-id derivation from `domain-id.js`,
-and event-id canonicalization from `event-dag.js`, §3.1 of the Yellow
-Paper), written directly from the same real specification, never by
-wrapping or transpiling the JS.
+Not a port of AIWA Chain to Rust — a real, growing, independent
+implementation of specific, real pieces of the protocol's own custom
+logic: the sequential VDF hash chain (`vdf.js`), domain-id derivation
+(`domain-id.js`), event-id canonicalization (`event-dag.js`, §3.1),
+generous-transfer's own deterministic outcome (`generous-transfer.js`,
+§15), the weighted median (`weighted-median.js`, §13), Conservation's
+own split invariant (`conservation.js`, §9, real 18-decimal amounts),
+Mirror's own reception monotonicity (`mirror.js`, §4), and
+relative-rate's own central ratio (`relative-rate.js`, §14) — each
+written directly from the same real specification, never by wrapping
+or transpiling the JS. Standard, already-widespread primitives
+(Ed25519 signatures, SHA-256 itself) are deliberately left to each
+ecosystem's own standard library rather than reimplemented here — the
+real, checked risk is silent divergence in this project's *own custom
+logic*, not in an already-standardized algorithm.
 
 `tests/rust-interop.test.mjs` builds this, runs it, and compares its
 real output against the real JS module's own output for the identical

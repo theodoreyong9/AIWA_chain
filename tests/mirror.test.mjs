@@ -173,3 +173,30 @@ test('a domain with a wide, organic spread of counterparties scores high entropy
   const narrow = computeResidualDiversity(narrowState, 'd');
   assert.ok(wide.entropy > narrow.entropy);
 });
+
+test('THE REAL INCREMENTAL CATCH-UP PROPERTY, verified for app.js\'s own rematerialize() fix (§12.1): applying only newly-arrived real reception events on top of already-materialized state produces byte-identical results to a full replay from scratch', async () => {
+  const signerA = makeSigner();
+  const domainA = await deriveDomainId(signerA.pubkeyBytes);
+  const signerB = makeSigner();
+  const domainB = await deriveDomainId(signerB.pubkeyBytes);
+
+  const events = [];
+  const p1 = await signCommitment(signerA, { domain: domainA, epoch: 1, kind: 'empty', receivedFrom: [] });
+  events.push({ id: 'a1', payload: { type: 'reception', ...p1 } });
+  const p2 = await signCommitment(signerA, { domain: domainA, epoch: 2, kind: 'full', receivedFrom: [{ sourceDomain: 'src', eventId: 'src-e' }] });
+  events.push({ id: 'a2', payload: { type: 'reception', ...p2 } });
+  const p3 = await signCommitment(signerB, { domain: domainB, epoch: 1, kind: 'empty', receivedFrom: [] });
+  events.push({ id: 'b1', payload: { type: 'reception', ...p3 } });
+
+  const lookup = () => 5; // a real, fixed, resolvable epoch for any real source reference
+
+  const fullReplay = await materializeMirror(events, lookup);
+
+  const coveredIds = new Set(['a1']);
+  let incremental = await materializeMirror(events.filter((e) => coveredIds.has(e.id)), lookup);
+  for (const event of events.filter((e) => !coveredIds.has(e.id))) {
+    incremental = await applyMirrorEvent(incremental, event, lookup);
+  }
+
+  assert.deepEqual(fullReplay, incremental, 'a real, partial-then-incremental catch-up must produce an identical real Mirror state to a full replay');
+});

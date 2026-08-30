@@ -17,7 +17,15 @@ export function initialProgressionState() {
 // this one-time catch-up work never has to run on the same thread
 // that also needs to render and handle input — the identical real
 // reason the ongoing progression loop was already moved off it.
+// A real, defensive robustness fix: a real, previously-undetected
+// bug (found while checking real scalability) called this with an
+// explicit `null` — JS's own default-parameter syntax only ever
+// applies to `undefined`, so `null` silently bypassed the real
+// default and crashed on the first real progression event. Resolved
+// here, once, so this exact class of mistake can never recur,
+// anywhere this function is called from.
 export async function applyProgressionEvent(state, event, verifyFn = verifyVdfChain) {
+  verifyFn ??= verifyVdfChain;
   const payload = event.payload;
   if (!payload || payload.type !== 'progression') return state;
 
@@ -47,6 +55,7 @@ export async function applyProgressionEvent(state, event, verifyFn = verifyVdfCh
 }
 
 export async function materializeProgression(orderedEvents, verifyFn = verifyVdfChain) {
+  verifyFn ??= verifyVdfChain;
   let state = initialProgressionState();
   for (const event of orderedEvents) state = await applyProgressionEvent(state, event, verifyFn);
   return state;

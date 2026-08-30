@@ -166,3 +166,35 @@ test('materializeWallet folds a real, complete sequence end to end', async () =>
   assert.equal(state.accrual.progression.domains[aliceId].epoch, 3);
   assert.equal(state.accrual.positions[aliceId].b, 10);
 });
+
+test('THE REAL INCREMENTAL CATCH-UP PROPERTY, verified for app.js\'s own rematerialize() fix (§12.1): applying only newly-arrived events on top of already-materialized state produces byte-identical results to a full replay from scratch', async () => {
+  const events = [];
+  let lastGenesis = null;
+
+  // Two real, causally-independent domains — the real scenario a
+  // real P2P sync or file import would bring in together.
+  for (const domain of ['domainA', 'domainB']) {
+    let previousOutput = 'genesis';
+    let lastId = null;
+    for (let e = 1; e <= 3; e++) {
+      const seed = vdfSeed(domain, previousOutput);
+      const vdfOutput = await computeVdfChain(seed, 30);
+      const id = `${domain}-e${e}`;
+      events.push({ id, parents: lastId ? [lastId] : [], payload: { type: 'progression', domain, epoch: e, vdfIterations: 30, vdfOutput } });
+      lastId = id;
+      previousOutput = vdfOutput;
+    }
+  }
+
+  const fullReplay = await materializeWallet(rewardParams, events, null, null, {});
+
+  // Real, incremental catch-up: half the events already "covered",
+  // matching what a real, partial materialization looks like.
+  const coveredIds = new Set(events.slice(0, 3).map((e) => e.id));
+  let incremental = await materializeWallet(rewardParams, events.filter((e) => coveredIds.has(e.id)), null, null, {});
+  for (const event of events.filter((e) => !coveredIds.has(e.id))) {
+    incremental = await applyWalletEvent(rewardParams, incremental, event, null, {});
+  }
+
+  assert.deepEqual(fullReplay, incremental, 'a real, partial-then-incremental catch-up must produce an identical real wallet state to a full replay — the exact property app.js\'s own rematerialize() now relies on to avoid O(total history) cost on every real sync');
+});

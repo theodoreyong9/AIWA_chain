@@ -8,6 +8,7 @@ import { computeVdfChain, vdfSeed } from '../public/core/vdf.js';
 import { deriveDomainId } from '../public/core/domain-id.js';
 import { EventDag } from '../public/core/event-dag.js';
 import { computeOutcomeHash, checkOutcome } from '../public/core/generous-transfer.js';
+import { weightedMedian } from '../public/core/weighted-median.js';
 
 // A real, independent Rust implementation (interop/rust-vdf) of the
 // identical, real specification vdf.js and domain-id.js implement —
@@ -81,4 +82,39 @@ test('THE REAL CROSS-RUNTIME PROPERTY: an independent Rust implementation produc
   assert.equal(rustOutput.losingCheck4, checkOutcome(losingHash, 4), 'the real threshold check itself must agree across runtimes, not just the raw hash');
   assert.equal(rustOutput.winningHash, winningHash, 'a real, winning outcome hash must match exactly across runtimes');
   assert.equal(rustOutput.winningCheck8, checkOutcome(winningHash, 8));
+
+  // §13's own real weighted median, two real, non-trivial vectors.
+  const median1 = weightedMedian([{ value: 100, weight: 30 }, { value: 50, weight: 45 }, { value: 200, weight: 10 }, { value: 75, weight: 15 }]);
+  const median2 = weightedMedian([{ value: 1000, weight: 5 }, { value: 2000, weight: 5 }, { value: 3000, weight: 90 }]);
+
+  assert.equal(rustOutput.median1, median1, 'the real, custom crossing-point median (never an average of the two middle values) must match exactly across runtimes');
+  assert.equal(rustOutput.median2, median2, 'a real, heavily-skewed-weight case must match exactly across runtimes too');
+
+  // §9's own real split invariant — a real, large, 18-decimal AIWA amount.
+  const total = 1000123456789012345678n;
+  const firstAmount = 333333333333333333333n;
+  const secondAmount = total - firstAmount;
+  assert.equal(rustOutput.secondAmount, secondAmount.toString(), 'a real, large, 18-decimal AIWA split must match exactly across runtimes — u128 in Rust playing BigInt\'s own real role');
+
+  // §4's own real reception monotonicity — the identical, real logic
+  // mirror.js's own applyMirrorEvent uses internally, verified here
+  // in isolation from the (already-standard, Ed25519) signature
+  // machinery around it.
+  function checkMonotonicity(priorMax, resolvedEpochs) {
+    for (const [sourceDomain, newMax] of Object.entries(resolvedEpochs)) {
+      const previous = priorMax[sourceDomain] ?? 0;
+      if (newMax < previous) return false;
+    }
+    return true;
+  }
+  const priorMax1 = { mars: 50, jupiter: 10 };
+  assert.equal(rustOutput.monotonicityCase1, checkMonotonicity(priorMax1, { mars: 55, jupiter: 10 }));
+  assert.equal(rustOutput.monotonicityCase2, checkMonotonicity(priorMax1, { mars: 40, jupiter: 15 }), 'a real regression on even one real source domain must be rejected identically across runtimes');
+
+  // §14's own real, central ratio computation — real IEEE 754 double
+  // division, must agree bit-for-bit across runtimes.
+  const observerDelta = 133 - 10;
+  const targetDelta = 481 - 100;
+  const ratio = targetDelta / observerDelta;
+  assert.equal(rustOutput.ratio, ratio, 'a real, non-integer relative-rate ratio must match exactly across runtimes, down to the last real floating-point digit');
 });
