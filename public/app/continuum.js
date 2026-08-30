@@ -177,6 +177,7 @@ function activeContinuum(root) {
       <div class="tab active" data-tab="continuum">Continuum</div>
       <div class="tab" data-tab="mirror">Mirror</div>
       <div class="tab" data-tab="ignition">Ignition</div>
+      <div class="tab" data-tab="generous">Give</div>
     </div>
 
     <div class="hero">

@@ -76,7 +76,7 @@ async function verifySplitAuthorization(event) {
   return (await deriveDomainId(fromHex(event.signerPubkey))) === event.owner;
 }
 
-export async function applyWalletEvent(rewardParams, state, event, verifyFn) {
+export async function applyWalletEvent(rewardParams, state, event, verifyFn, contractVerifiers = {}) {
   const payload = event.payload;
   if (!payload || typeof payload.type !== 'string') return state;
 
@@ -129,13 +129,49 @@ export async function applyWalletEvent(rewardParams, state, event, verifyFn) {
     }
   }
 
+  // generous-transfer.js's own external contract (§15) — the one,
+  // narrow, explicitly justified exception to this project's own
+  // "never touch the core protocol for a contract" principle (§15.1).
+  // A real, generic extension point — never a per-contract case added
+  // here again. Any contract wanting to move real, already-owned AIWA
+  // conditionally (§15.1's own external-contract principle) exposes
+  // its own real `verifyPayout(payload)`, registered by the
+  // application under its own real `contractId` (never wallet.js's
+  // own source) in `contractVerifiers`. wallet.js only ever
+  // guarantees the one thing every such contract needs and can
+  // safely share: the pre-signed transfer's own signature is real and
+  // valid, checked identically to an ordinary transfer, before ever
+  // asking the contract's own logic whether its own conditions were
+  // genuinely met.
+  if (payload.type === 'contract-payout') {
+    const { contractId, claimId, from, to, nonce, timestamp, signerPubkey, signature } = payload;
+    const reject = (reason) => ({ ...state, rejections: [...state.rejections, { eventId: event.id, reason }] });
+    if (typeof contractId !== 'string' || !contractId) return reject('missing contractId');
+    const verifier = contractVerifiers[contractId];
+    if (!verifier) return reject(`unregistered contract: ${contractId}`);
+    if (![claimId, from, to, nonce, signerPubkey, signature].every((v) => typeof v === 'string' && v)) return reject('malformed contract-payout transfer fields');
+    if (state.usedNonces[nonce]) return reject('nonce already used');
+    if (!(await verifyTransferAuthorization({ claimId, from, to, nonce, timestamp, signerPubkey, signature }))) return reject('invalid transfer signature');
+    const verified = await verifier(payload);
+    if (!verified) return reject(`contract '${contractId}' rejected its own real conditions`);
+    if (verified.claimId !== claimId || verified.from !== from || verified.to !== to || verified.nonce !== nonce || verified.signature !== signature) {
+      return reject('contract verifier returned fields not matching the real, submitted event');
+    }
+    try {
+      const { state: conservation } = transfer(state.conservation, { claimId, from, to, n: 0, derivation: 'identity' }, derivations);
+      return { ...state, conservation, usedNonces: { ...state.usedNonces, [nonce]: true } };
+    } catch (e) {
+      return reject(e.message);
+    }
+  }
+
   return state;
 }
 
-export async function materializeWallet(rewardParams, orderedEvents, onProgress, verifyFn) {
+export async function materializeWallet(rewardParams, orderedEvents, onProgress, verifyFn, contractVerifiers = {}) {
   let state = initialWalletState();
   for (let i = 0; i < orderedEvents.length; i++) {
-    state = await applyWalletEvent(rewardParams, state, orderedEvents[i], verifyFn);
+    state = await applyWalletEvent(rewardParams, state, orderedEvents[i], verifyFn, contractVerifiers);
     if (onProgress && i % 20 === 0) onProgress(i + 1, orderedEvents.length);
   }
   if (onProgress) onProgress(orderedEvents.length, orderedEvents.length);

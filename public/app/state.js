@@ -13,6 +13,32 @@ export const state = {
   importedDomains: new Set(), // domains genuinely brought in via a real reconciliation.js import — never a raw scan of local storage, which would also catch this browser's own earlier, disconnected-from identities
   lastEpochAt: 0,
   busy: {},
+  // Real generous-send-offer events addressed to this domain, not yet
+  // included as a parent of this domain's own next real epoch — see
+  // generous-transfer.js (§15). Keyed by the real offer event's own
+  // id; entries are removed once genuinely included (win or lose,
+  // each real offer gets exactly one real chance).
+  pendingGenerousSends: {},
+  // Real generous-send-offer events THIS domain has itself sent, kept
+  // to know what to keep checking on — never security-relevant,
+  // purely for the UI to know what to look up.
+  sentGenerousSends: {},
+  // Real, known outcomes for this domain's own sent offers — keyed by
+  // offer event id, value 'pending' | 'won' | 'lost'. 'lost' can only
+  // ever be inferred by having actually received (synced) the real
+  // recipient's own progression event that included the offer as a
+  // parent, without a matching real payout following it — never
+  // assumed just because time has passed.
+  sentGenerousSendOutcomes: {},
+  // Real, resolved generous sends this domain has been part of
+  // (either side), kept for the UI — never re-consulted for security.
+  generousSendHistory: [],
+  // Real, own rate witnesses (§14) — keyed by real target domain,
+  // each a real, signed, published event. Two or more, for the same
+  // real target, let computeRelativeRate() derive a real relative
+  // rate — never a clock, purely this domain's own repeated
+  // observation of the same real target's own real epoch.
+  rateWitnesses: {},
 };
 
 export const REWARD_PARAMS = { alpha: 1.1, beta: 2.2, gamma: 3, C: Math.pow(33, 3), minQ: 1 };

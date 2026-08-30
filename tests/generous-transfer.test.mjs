@@ -200,3 +200,27 @@ test('the real, public CONTRACT_ID is present on every real, correctly-built com
   assert.equal(c.contractId, CONTRACT_ID);
   assert.equal(CONTRACT_ID, 'aiwa-generous-transfer-v1');
 });
+
+test('THE REAL OFFER-BUILDING PROPERTY: buildOfferPayload produces a real commitment and a real, wallet.js-compatible pre-signed transfer, ready to feed directly into verifyPayout', async () => {
+  const { buildSignedTransferEvent } = await import('../public/core/wallet.js');
+  const { deriveDomainId } = await import('../public/core/domain-id.js');
+  const { buildOfferPayload, computeOutcomeHash, checkOutcome } = await import('../public/core/generous-transfer.js');
+
+  const donor = makeKeypair();
+  const donorDomain = await deriveDomainId(donor.publicKey.toBytes());
+
+  const offer = await buildOfferPayload(donor, donorDomain, {
+    baseTransferId: 't1', to: 'bob-real', bonusClaimId: 'donor-claim-x', bonusAmount: '5', thresholdBits: 0,
+  }, buildSignedTransferEvent);
+
+  assert.equal(offer.type, 'generous-send-offer');
+  assert.equal(verifyGenerousSendSignature(offer.commitment), true);
+  assert.equal(offer.preSignedTransfer.claimId, 'donor-claim-x');
+  assert.equal(offer.preSignedTransfer.from, donorDomain, 'the real pre-signed transfer must use the real, derived domain id, never a raw pubkey');
+  assert.equal(offer.preSignedTransfer.to, 'bob-real');
+
+  // The real, full, end-to-end path: resolve against a real qualifying epoch.
+  const qualifyingEpochEvent = await realNextEpochEvent('bob-real', 6, 'prior-real-output', ['real-offer-event-id']);
+  const result = await resolveGenerousSend({ commitment: offer.commitment, generousSendEventId: 'real-offer-event-id', qualifyingEpochEvent, priorVdfOutput: 'prior-real-output' });
+  assert.equal(result.won, true);
+});

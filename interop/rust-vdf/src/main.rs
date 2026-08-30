@@ -81,6 +81,33 @@ fn compute_event_id(parents: &mut Vec<String>, payload: &Value) -> String {
     to_hex(&sha256(canonical.as_bytes()))
 }
 
+// A real, independent implementation of generous-transfer.js's own
+// real, deterministic outcome computation (§15) — never randomness,
+// exactly like mining: the same real hash function, the same real
+// leading-zero-bit count, computed here completely independently.
+fn compute_outcome_hash(generous_send_event_id: &str, vdf_output: &str) -> String {
+    let combined = format!("{}:{}", generous_send_event_id, vdf_output);
+    to_hex(&sha256(combined.as_bytes()))
+}
+
+fn count_leading_zero_bits(hex_string: &str) -> u32 {
+    let mut bits = 0u32;
+    for ch in hex_string.chars() {
+        let nibble = ch.to_digit(16).unwrap_or(0);
+        if nibble == 0 {
+            bits += 4;
+            continue;
+        }
+        bits += nibble.leading_zeros() - 28;
+        break;
+    }
+    bits
+}
+
+fn check_outcome(hash_hex: &str, threshold_bits: u32) -> bool {
+    count_leading_zero_bits(hash_hex) >= threshold_bits
+}
+
 fn main() {
     // Real, fixed test vectors — the identical ones
     // tests/rust-interop.test.mjs computes against via the real JS
@@ -111,8 +138,15 @@ fn main() {
     });
     let composed_id = compute_event_id(&mut composed_parents, &composed_payload);
 
+    // The identical, real test vectors found and verified against the
+    // real JS generous-transfer.js — one real, honest loss, one real win.
+    let losing_hash = compute_outcome_hash("commitment-id-abc", "vdf-output-xyz-123");
+    let winning_hash = compute_outcome_hash("commitment-id-abc", "vdf-output-90");
+
     println!(
-        "{{\"vdf1\":\"{}\",\"vdf2\":\"{}\",\"vdf3\":\"{}\",\"domainId\":\"{}\",\"genesisId\":\"{}\",\"accrualId\":\"{}\",\"composedId\":\"{}\"}}",
-        vdf1, vdf2, vdf3, domain_id, genesis_id, accrual_id, composed_id
+        "{{\"vdf1\":\"{}\",\"vdf2\":\"{}\",\"vdf3\":\"{}\",\"domainId\":\"{}\",\"genesisId\":\"{}\",\"accrualId\":\"{}\",\"composedId\":\"{}\",\"losingHash\":\"{}\",\"losingCheck4\":{},\"winningHash\":\"{}\",\"winningCheck8\":{}}}",
+        vdf1, vdf2, vdf3, domain_id, genesis_id, accrual_id, composed_id,
+        losing_hash, check_outcome(&losing_hash, 4),
+        winning_hash, check_outcome(&winning_hash, 8)
     );
 }

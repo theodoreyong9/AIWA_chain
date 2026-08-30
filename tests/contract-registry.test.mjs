@@ -64,3 +64,20 @@ test('readContractSource returns null, never throws, for a non-contract-spec eve
   const notASpec = { payload: { type: 'genesis' } };
   assert.equal(readContractSource(notASpec), null);
 });
+
+test('scanContractSpecs finds every real, published contract-spec event', async () => {
+  const dag = new EventDag();
+  await publishContractSpec(dag, { name: 'contract-a', version: 1, sourceCode: 'code-a', description: '' });
+  await publishContractSpec(dag, { name: 'contract-b', version: 1, sourceCode: 'code-b', description: '' });
+  const { scanContractSpecs } = await import('../public/core/contract-registry.js');
+  const specs = scanContractSpecs(dag.topoOrder());
+  assert.equal(specs.length, 2);
+  assert.deepEqual(specs.map((s) => s.name).sort(), ['contract-a', 'contract-b']);
+});
+
+test('scanContractSpecs ignores real, non-contract-spec events', async () => {
+  const dag = new EventDag();
+  await dag.addEvent([], { type: 'genesis' });
+  const { scanContractSpecs } = await import('../public/core/contract-registry.js');
+  assert.equal(scanContractSpecs(dag.topoOrder()).length, 0);
+});

@@ -177,3 +177,46 @@ export async function resolveGenerousSend({ commitment, generousSendEventId, qua
   const won = checkOutcome(hash, commitment.thresholdBits);
   return { won, bonusClaimId: commitment.bonusClaimId, bonusAmount: commitment.bonusAmount, to: commitment.to };
 }
+
+/**
+ * The one, real, standard-shaped entry point wallet.js's own generic
+ * `contract-payout` dispatch (registered by contractId — never
+ * hardcoded per contract) calls into. Every real, contract-specific
+ * check this file owns — commitment signature, qualifying epoch,
+ * real VDF re-verification, the real outcome threshold, and that the
+ * pre-signed transfer's own fields genuinely match what the
+ * commitment actually authorized — is composed here, once. Returns a
+ * real, ready-to-apply transfer shape identical to an ordinary
+ * `transfer` event's own fields, or a real, honest null on any
+ * single failure — wallet.js never re-implements any of this itself.
+ *
+ * @returns {{ claimId: string, from: string, to: string, nonce: string, timestamp: number, signerPubkey: string, signature: string } | null}
+ */
+export async function verifyPayout(payload) {
+  const { claimId, from, to, nonce, timestamp, signerPubkey, signature, commitment, generousSendEventId, qualifyingEpochEvent, priorVdfOutput } = payload;
+  if (![claimId, from, to, nonce, signerPubkey, signature].every((v) => typeof v === 'string' && v)) return null;
+  if (!commitment || !generousSendEventId || !qualifyingEpochEvent) return null;
+  if (commitment.bonusClaimId !== claimId || commitment.to !== to) return null;
+  const result = await resolveGenerousSend({ commitment, generousSendEventId, qualifyingEpochEvent, priorVdfOutput });
+  if (!result || !result.won) return null;
+  return { claimId, from, to, nonce, timestamp, signerPubkey, signature };
+}
+
+/**
+ * Builds the one, real, publishable event a donor creates to start a
+ * real generous send — the commitment (§ above) and a real,
+ * pre-signed bonus transfer, bundled together. `buildTransfer` is the
+ * real, already-existing `buildSignedTransferEvent` from `wallet.js`
+ * — reused directly, never duplicated, so this always signs the
+ * identical real message format `wallet.js`'s own transfer
+ * verification already expects. `donorDomain` must be the real,
+ * already-derived domain id for `keypair` — never re-derived here,
+ * to keep this file independent of `domain-id.js`.
+ *
+ * @returns {object} a real, ready-to-publish `generous-send-offer` payload
+ */
+export async function buildOfferPayload(keypair, donorDomain, { baseTransferId, to, bonusClaimId, bonusAmount, thresholdBits }, buildTransfer) {
+  const commitment = await buildGenerousSendCommitment(keypair, { baseTransferId, to, bonusClaimId, bonusAmount, thresholdBits });
+  const preSignedTransfer = await buildTransfer({ claimId: bonusClaimId, from: donorDomain, to }, keypair.secretKey.slice(0, 32), keypair.publicKey.toBytes());
+  return { type: 'generous-send-offer', commitment, preSignedTransfer };
+}

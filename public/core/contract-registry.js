@@ -62,3 +62,8 @@ export async function verifyContractSource(specEvent, sourceCode) {
   const realHash = await computeContractHash(sourceCode);
   return realHash === specEvent.payload.sourceHash;
 }
+
+/** Every real contract-spec event found in `events` — pure, no browser dependency. */
+export function scanContractSpecs(events) {
+  return events.filter((ev) => ev.payload?.type === 'contract-spec').map((ev) => ({ id: ev.id, ...ev.payload }));
+}

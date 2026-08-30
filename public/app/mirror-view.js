@@ -1,10 +1,12 @@
 import { state, short } from './state.js';
-import { render, rematerialize } from './app.js';
+import { render, rematerialize, applyIncremental } from './app.js';
 import { exportHistory, importHistory, buildReceptionCommitment } from './reconciliation.js';
 import { disconnect } from './identity.js';
 import { computeResidualDiversity, deriveSourceEpochLookup } from '../core/mirror.js';
 import { P2PConnection } from './p2p-connection.js';
 import { TrysteroConnection } from './trystero-connection.js';
+import { buildRateWitness, computeRelativeRate } from '../core/relative-rate.js';
+import { scanOwnRateWitnesses } from './relative-rate-scan.js';
 
 const PUBLIC_LOBBY_ROOM = 'aiwa-chain-public-lobby-v1';
 
@@ -243,6 +245,7 @@ export function renderMirror(root) {
         <div class="tab" data-tab="continuum">Continuum</div>
         <div class="tab active" data-tab="mirror">Mirror</div>
         <div class="tab" data-tab="ignition">Ignition</div>
+      <div class="tab" data-tab="generous">Give</div>
       </div>
       <div class="empty-state"><div class="glyph">\u25CB</div>No identity yet \u2014 create one in Continuum first.</div>
     `;
@@ -251,6 +254,7 @@ export function renderMirror(root) {
   }
 
   const verifiedDomains = verifiedObservedDomains();
+  const ownRateWitnesses = scanOwnRateWitnesses(state.dag.topoOrder(), state.domainId);
   const pendingDomains = pendingImportDomains();
   const myEpoch = state.wallet.accrual.progression.domains[state.domainId]?.epoch ?? 0;
   const corroboratedEpoch = state.causalTick?.tick ?? 0;
@@ -268,6 +272,7 @@ export function renderMirror(root) {
       <div class="tab" data-tab="continuum">Continuum</div>
       <div class="tab active" data-tab="mirror">Mirror</div>
       <div class="tab" data-tab="ignition">Ignition</div>
+      <div class="tab" data-tab="generous">Give</div>
     </div>
 
     <div class="card" style="border-color:${unobservedEpochs > 0 ? 'var(--amber-dim)' : 'var(--border)'}">
@@ -290,6 +295,29 @@ export function renderMirror(root) {
           : '';
       })()}
       ${entropicSpaceSvg(verifiedDomains)}
+    </div>
+
+    <div class="card">
+      <div class="card-title">Relative rate (§14)</div>
+      <p class="hint">Never a clock \u2014 witness a domain twice, at two different real moments of your own progression, and the real ratio between your own real epoch delta and theirs emerges on its own. Purely informational; never affects what anyone can claim.</p>
+      ${[...verifiedDomains.keys()].length === 0
+        ? `<p class="hint">Nothing observed yet.</p>`
+        : [...verifiedDomains.keys()].map((domainId) => {
+          const witnesses = ownRateWitnesses[domainId] ?? [];
+          const myEpoch = state.wallet?.accrual?.progression?.domains?.[state.domainId]?.epoch ?? 0;
+          let rateLabel = witnesses.length < 2 ? `${witnesses.length}/2 witnessed` : (() => {
+            const rate = computeRelativeRate(witnesses[witnesses.length - 2], witnesses[witnesses.length - 1]);
+            return rate === null ? 'not yet comparable' : `\u2248 ${rate.toFixed(2)}\u00d7 your own rate`;
+          })();
+          return `
+            <div class="row">
+              <span class="row-label">${short(domainId, 10)}</span>
+              <span class="row-value">${rateLabel}</span>
+            </div>
+            <div class="btn-row" style="margin-bottom:8px"><button class="ghost" data-witness="${domainId}" style="padding:4px 10px; font-size:11px">Witness now (at your epoch ${myEpoch})</button></div>
+          `;
+        }).join('')
+      }
     </div>
 
     <div class="card">
@@ -455,6 +483,24 @@ export function renderMirror(root) {
 
   root.querySelectorAll('[data-commit]').forEach((btn) => {
     btn.addEventListener('click', () => doCommitReception(root, btn.dataset.commit, pendingDomains.get(btn.dataset.commit)));
+  });
+
+  root.querySelectorAll('[data-witness]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const targetDomain = btn.dataset.witness;
+      const myEpoch = state.wallet?.accrual?.progression?.domains?.[state.domainId]?.epoch ?? 0;
+      const info = verifiedDomains.get(targetDomain);
+      const lookup = deriveSourceEpochLookup(state.dag.topoOrder());
+      const targetEpoch = info ? lookup(targetDomain, info.lastEventId) : null;
+      if (targetEpoch === null || targetEpoch === undefined) return; // no real, resolvable epoch for this target yet — nothing honest to witness
+      const witness = await buildRateWitness(state.keypair, state.domainId, myEpoch, targetDomain, targetEpoch, info.lastEventId);
+      const payload = { type: 'rate-witness', ...witness };
+      const parents = [state.lastEventId];
+      const newId = await state.dag.addEvent(parents, payload);
+      state.lastEventId = newId;
+      await applyIncremental(newId, parents, payload);
+      render();
+    });
   });
 
   // Real QR injection happens after the synchronous render, since

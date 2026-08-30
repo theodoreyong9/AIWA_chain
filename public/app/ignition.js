@@ -52,6 +52,7 @@ export function renderIgnition(root) {
         <div class="tab" data-tab="continuum">Continuum</div>
         <div class="tab" data-tab="mirror">Mirror</div>
         <div class="tab active" data-tab="ignition">Ignition</div>
+      <div class="tab" data-tab="generous">Give</div>
       </div>
       <div class="empty-state"><div class="glyph">\u25CB</div>No identity yet \u2014 create one in Continuum first.</div>
     `;
@@ -81,6 +82,7 @@ export function renderIgnition(root) {
       <div class="tab" data-tab="continuum">Continuum</div>
       <div class="tab" data-tab="mirror">Mirror</div>
       <div class="tab active" data-tab="ignition">Ignition</div>
+      <div class="tab" data-tab="generous">Give</div>
     </div>
 
     <div class="hero">

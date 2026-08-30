@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { computeVdfChain, vdfSeed } from '../public/core/vdf.js';
 import { deriveDomainId } from '../public/core/domain-id.js';
 import { EventDag } from '../public/core/event-dag.js';
+import { computeOutcomeHash, checkOutcome } from '../public/core/generous-transfer.js';
 
 // A real, independent Rust implementation (interop/rust-vdf) of the
 // identical, real specification vdf.js and domain-id.js implement —
@@ -69,4 +70,15 @@ test('THE REAL CROSS-RUNTIME PROPERTY: an independent Rust implementation produc
   assert.equal(rustOutput.genesisId, genesisId, 'a real, minimal event id must match exactly across runtimes');
   assert.equal(rustOutput.accrualId, accrualId, 'a real event with a flat payload must match exactly across runtimes');
   assert.equal(rustOutput.composedId, composedId, 'a real event with a nested payload and out-of-order parents must match exactly — the real test of §3.1\'s own canonical sort, not just a pass-through case');
+
+  // §15's own real, deterministic outcome — a real loss and a real
+  // win, both independently recomputed here against the identical,
+  // real JS generous-transfer.js.
+  const losingHash = await computeOutcomeHash('commitment-id-abc', 'vdf-output-xyz-123');
+  const winningHash = await computeOutcomeHash('commitment-id-abc', 'vdf-output-90');
+
+  assert.equal(rustOutput.losingHash, losingHash, 'a real, honest-loss outcome hash must match exactly across runtimes');
+  assert.equal(rustOutput.losingCheck4, checkOutcome(losingHash, 4), 'the real threshold check itself must agree across runtimes, not just the raw hash');
+  assert.equal(rustOutput.winningHash, winningHash, 'a real, winning outcome hash must match exactly across runtimes');
+  assert.equal(rustOutput.winningCheck8, checkOutcome(winningHash, 8));
 });

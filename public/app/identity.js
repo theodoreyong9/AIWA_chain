@@ -1,7 +1,7 @@
 import { deriveDomainId } from '../core/domain-id.js';
 import { generateLightweightKeypair, lightweightKeypairFromSecretKey, deriveKeypairFromPassphrase, deriveKeypairFromBip39Mnemonic, encryptSecretKey, decryptSecretKey } from '../core/solana-wallet.js';
 import { state, notify } from './state.js';
-import { startProgressionLoop, refreshCausalTick } from './app.js';
+import { startProgressionLoop, refreshCausalTick, refreshPendingGenerousSends, refreshSentGenerousSends } from './app.js';
 
 const SAVED_KEY_STORAGE = 'aiwa-chain-saved-key';
 
@@ -10,9 +10,12 @@ async function finishActivation(kp) {
   state.domainId = await deriveDomainId(kp.publicKey.toBytes());
   // wallet/mirror/identity-cost are already real and current from
   // boot's own full materialization, covering every domain regardless
-  // of which one happens to be active — only the causal tick actually
-  // depends on which identity this now is.
+  // of which one happens to be active — only the causal tick, and any
+  // real, pending or sent generous sends for this specific domain,
+  // actually depend on which identity this now is.
   await refreshCausalTick();
+  refreshPendingGenerousSends();
+  refreshSentGenerousSends();
   notify();
   startProgressionLoop();
 }

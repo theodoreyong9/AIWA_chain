@@ -187,6 +187,8 @@ a purely structural ratio. **This is not underdetermined**, though a single snap
 
 **Purely informational**, by the same principle as §13: this never feeds back into what any domain may claim, never bounds or adjusts $\mathrm{epoch}_D$ for anyone. It is offered as a real, emergent statistical regularity — never a synchronization primitive, never a shared clock, never an input any domain's own security depends on. It is a measure of *relative rate between a pair*, never itself a claim of convergence toward a network-wide homogeneous cadence; whether real-world hardware happens to cluster or spread is an empirical fact about physical reality, neither caused nor established by this mechanism.
 
+**Real interface.** Mirror's own "Relative rate" card offers a real "Witness now" button per already-observed domain — building and publishing a real, signed witness at this domain's own current epoch. Once two real witnesses exist for the same real target, the real ratio is computed and shown directly, using the identical `computeRelativeRate` above — never a separate, UI-only approximation.
+
 ### 14.1 Composition is unsafe without a freshness bound
 
 $\rho_{AB} \cdot \rho_{BC} = \rho_{AC}$ holds mathematically, but composing two independently-measured real ratios is unsafe if the intermediate domain's own real rate can drift between the two measurements — genuinely, with no forged signature required. Verified concretely: a real, honest change in $B$'s own rate between measuring $\rho_{AB}$ and $\rho_{BC}$ produced a $2\times$ error in the naively composed result. A malicious $B$, who freely chooses when it measures the next link, can exploit this without forging anything.
@@ -213,9 +215,23 @@ where $e_q$ is a real progression event of $\mathrm{to}$'s own chain with $\math
 
 **Enforceable by anyone.** Resolution requires only real, already-public data — $c$'s own signature, $e_q$'s own real, independently-verifiable content — so the recipient, or any third party, can construct and submit it; the donor's cooperation is never required after the fact, and cannot be withheld.
 
+**Real interface.** A fourth, real tab — "Give" — sends a real, ordinary transfer alongside an optional, real, at-risk amount; pending offers addressed to this domain, and their real, resolved outcomes, are shown automatically. No new server or infrastructure: the same real progression loop that already runs (§5) also includes any real, pending offer as an extra parent of this domain's own next epoch, resolving it the identical way described above.
+
+**Donor-side outcomes.** A real win produces a real, findable `contract-payout` event; a real loss produces nothing at all, so it can only ever be *inferred* — never assumed from elapsed time — by having actually received (synced) the real recipient's own progression event that included the offer as a real parent, with no matching payout following. `generous-send-scan.js` — pure, no browser dependency, directly tested — implements this scan; the "Give" tab's own "What you've sent" card surfaces it, with a plain note that a real "no win" can only appear once real reconciliation (§4) has actually reached this domain.
+
 ### 15.1 Contract identity and composability
 
 This is deliberately built as an external contract, never a modification to the core protocol above — the same real, existing primitives (transfer, progression, VDF verification) are only ever *consumed*, never altered. A domain's own address is a direct cryptographic proof (§2); encoding a contract tag into it risks real confusion about which real destination a transfer actually targets, so this contract's own $\mathrm{CONTRACT\_ID} = \texttt{aiwa-generous-transfer-v1}$ is instead part of $c$'s own signed content (§ above), never mangled into an address. A later, composing contract references this same real, public id explicitly in its own events (e.g. its own real field $\mathrm{wrapsContractId} = \mathrm{CONTRACT\_ID}$) rather than adopting any address-mangling scheme — "upstream" (other contracts building on this one) and "downstream" (users sending through it directly) both resolve to the identical, real, public string.
+
+### 15.2 A generic payout mechanism — real, spendable AIWA, without a per-contract core change
+
+For a contract's own conditional outcome to move real, spendable AIWA at all, some real code must eventually apply a real state transition to Conservation's own claim ledger — the one part of this contract genuinely outside its own file. An initial version hardcoded this contract's own verification directly into `wallet.js`; found, during design, not to scale — every future contract wanting the identical real capability would need its own hardcoded case added to the core, contradicting §15's own external-contract principle.
+
+$$e_{\mathrm{payout}} = \{\mathrm{type}: \texttt{contract-payout}, \mathrm{contractId}, \mathrm{claimId}, \mathrm{from}, \mathrm{to}, \mathrm{nonce}, \mathrm{timestamp}, \mathrm{signerPubkey}, \mathrm{signature}, \ldots\}$$
+
+`wallet.js` instead exposes one real, generic extension point: a real `contractVerifiers` map — $\{\mathrm{contractId} \mapsto \mathrm{verifyPayout}\}$ — supplied by the application, never wallet.js's own source. On a real `contract-payout` event, wallet.js independently verifies only what every such contract shares (the pre-signed transfer's own real signature, identical to an ordinary `transfer`), then delegates entirely to the registered contract's own `verifyPayout(payload)` for everything contract-specific. A real, honest `null` from the verifier, or a returned shape not matching the real, submitted event's own fields, rejects outright — nothing is trusted by default, and an unregistered $\mathrm{contractId}$ is refused, never silently ignored or treated as valid. `wallet.js`'s own source needs no further change for a new contract; only the application's own registry grows.
+
+---
 
 ## 16. Publishing a contract, content-addressed
 
@@ -227,7 +243,7 @@ Once $e_{\mathrm{spec}}$ is received by other domains (Mirror, §4, exactly like
 
 **No canonical registry, deliberately.** This never enforces that exactly one implementation may claim a given name — multiple, real, competing contracts can coexist, each with its own real, verifiable identity; wallets and users choose which to trust, exactly as no single chain enforces one true implementation of a common token standard.
 
-**Honest limit, current state.** No interface exists yet — publishing and reading a contract-spec is only ever done by code today, real and tested, never through Continuum, Ignition, or Mirror. A genuine proof of concept: the mechanism is real and safe; only the interface to reach it is missing. Real transport (§11.1's own P2P sync, unchanged) already carries a `contract-spec` event exactly like any other — the missing piece is narrower than transport.
+**Real interface.** The "Give" tab's own "Publish a contract" card exposes this directly — name, version, complete source, description, then a real, immutable, content-addressed id. `scanContractSpecs` lists every real, already-known contract-spec this domain has received. Real transport (§11.1's own P2P sync, unchanged) already carries a `contract-spec` event exactly like any other — publishing was always narrower than transport; now the interface reaches it too.
 
 ### 16.1 A real, asymmetric trust direction for interchain verification (unexplored, not built)
 
@@ -253,10 +269,10 @@ Every real event here is verifiable using only standard, non-proprietary primiti
 | Mirror (§4) | `public/core/mirror.js` |
 | Causal Tick (§13) | `public/core/causal-tick.js`, `public/core/weighted-median.js` |
 | Hardware roots (§13.1) | `public/core/hardware-attestation.js` |
-| Relative rate, no clock (§14) | `public/core/relative-rate.js` — purely informational, weighted like §13 |
-| Generous transfer, deterministic (§15) | `public/core/generous-transfer.js` — never chance, verified end-to-end against the real progression protocol |
+| Relative rate, no clock (§14) | `public/core/relative-rate.js`, `public/app/relative-rate-scan.js` — purely informational, weighted like §13 |
+| Generous transfer, deterministic (§15) | `public/core/generous-transfer.js`, `public/app/generous-send-scan.js` — never chance, verified end-to-end against the real progression protocol, cross-runtime verified (Rust) |
 | Contract publishing, content-addressed (§16) | `public/core/contract-registry.js` |
 | Live peer-to-peer sync | `public/core/p2p-signaling.js`, `public/app/sync-protocol.js`, `public/app/p2p-connection.js`, `public/app/trystero-connection.js` |
 | Coherent composition | `public/core/wallet.js` |
 
-275 tests; every case but the cross-runtime check runs unconditionally, which skips (never fails) without a Rust toolchain. Security-relevant cases are named as such in their own files.
+294 tests; every case but the cross-runtime check runs unconditionally, which skips (never fails) without a Rust toolchain. Security-relevant cases are named as such in their own files.
