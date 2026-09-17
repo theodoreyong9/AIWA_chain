@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { reward, RewardError, elapsedEpochs, domainAge } from '../public/core/reward.js';
+import { reward, rewardFixed, RewardError, elapsedEpochs, domainAge } from '../public/core/reward.js';
+import { fixedToNumber } from '../public/core/fixed-point-math.js';
 
 const params = { alpha: 1.1, beta: 2.2, gamma: 3, C: Math.pow(33, 3), minQ: 1 };
 
@@ -49,6 +50,40 @@ test('reward never returns a negative or non-finite number for valid finite inpu
   const r = reward(1e6, 1e6, 1e6, 0.2, params);
   assert.ok(Number.isFinite(r));
   assert.ok(r >= 0);
+});
+
+// rewardFixed is the real, reproducible core reward() itself is now a thin
+// wrapper over (see reward.js's own header, and tests/rust-interop.test.mjs
+// for the independent Rust verification) — these confirm the two stay
+// consistent with each other, not just that reward() alone looks right.
+
+test('rewardFixed and reward agree — reward() is exactly fixedToNumber(rewardFixed())', () => {
+  const fixed = rewardFixed(10, 5000000, 5000000, 0.2, params);
+  assert.ok(fixed !== null);
+  assert.equal(reward(10, 5000000, 5000000, 0.2, params), fixedToNumber(fixed));
+});
+
+test('rewardFixed returns null exactly where reward() returns 0 — below minQ', () => {
+  assert.equal(rewardFixed(10, 0, 1, 0, params), null);
+  assert.equal(reward(10, 0, 1, 0, params), 0);
+});
+
+test('rewardFixed is deterministic: the identical inputs always yield the identical BigInt, never merely a numerically close one', () => {
+  const a = rewardFixed(10, 5000000, 5000000, 0.2, params);
+  const b = rewardFixed(10, 5000000, 5000000, 0.2, params);
+  assert.equal(a, b);
+});
+
+test('rewardFixed throws RewardError for invalid input, same as reward() — the validation lives in one real place, not duplicated', () => {
+  assert.throws(() => rewardFixed(-1, 1, 1, 0, params), RewardError);
+});
+
+test('THE REAL CASE THIS REWRITE EXISTS FOR: reward stays accurate after a full year of continuous domain progression (~112M epochs), where the original Math.pow(qTotal, ...) computation risked overflow before ever reaching Math.log', () => {
+  const oneYearEpochs = 112_000_000;
+  const r = rewardFixed(10, oneYearEpochs, oneYearEpochs, 0.2, params);
+  assert.ok(r !== null);
+  assert.ok(r > 0n);
+  assert.ok(Number.isFinite(fixedToNumber(r)));
 });
 
 test('elapsedEpochs reads the current domain epoch relative to q0', () => {
