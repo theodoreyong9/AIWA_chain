@@ -1,6 +1,8 @@
 // 18-decimal fixed-point AIWA amounts. Always bigint smallest units,
 // never a float. Conversion is string-based, never float multiplication.
 
+import { SCALE } from './fixed-point-math.js';
+
 export const DECIMALS = 18;
 const UNIT = 10n ** BigInt(DECIMALS);
 
@@ -38,6 +40,20 @@ export function fromFloat(value, decimals = DECIMALS) {
   if (!Number.isFinite(value)) throw new Error(`Non-finite value: ${value}`);
   if (Math.abs(value) >= 1e21) throw new Error(`Value too large: ${value}`);
   return toUnits(value.toFixed(decimals), decimals);
+}
+
+// A Q128 fixed-point value (fixed-point-math.js's own Fixed — see
+// reward.js's rewardFixed) straight to base units: one BigInt multiply,
+// one truncating divide, never a float in between. This is what
+// accrual.js's own real claim path uses instead of fromFloat(reward(...)):
+// rewardFixed()'s whole point is a cross-runtime-reproducible BigInt
+// result, and routing it through a JS Number first (fromFloat's own
+// value.toFixed(decimals)) would reintroduce exactly the kind of
+// non-guaranteed rounding step that exists to avoid.
+export function fixedToUnits(fixedValue, decimals = DECIMALS) {
+  if (typeof fixedValue !== 'bigint') throw new Error(`Expected bigint, got ${typeof fixedValue}`);
+  if (fixedValue < 0n) throw new Error(`fixedToUnits: negative value ${fixedValue}`);
+  return (fixedValue * 10n ** BigInt(decimals)) / SCALE;
 }
 
 export function format(units, maxDecimals = 6) {

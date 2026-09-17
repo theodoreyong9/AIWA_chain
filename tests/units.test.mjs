@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DECIMALS, toUnits, fromUnits, fromFloat, format } from '../public/core/units.js';
+import { DECIMALS, toUnits, fromUnits, fromFloat, fixedToUnits, format } from '../public/core/units.js';
+import { SCALE, numberToFixed } from '../public/core/fixed-point-math.js';
 
 test('DECIMALS is 18', () => {
   assert.equal(DECIMALS, 18);
@@ -48,6 +49,22 @@ test('fromFloat is faithful to what the float actually holds, unlike naive multi
 test('fromFloat rejects non-finite input', () => {
   assert.throws(() => fromFloat(NaN));
   assert.throws(() => fromFloat(Infinity));
+});
+
+test('fixedToUnits converts a Q128 fixed-point value straight to base units, exactly, no float in between', () => {
+  assert.equal(fixedToUnits(SCALE), 1000000000000000000n); // exactly 1.0
+  assert.equal(fixedToUnits(SCALE * 5n), 5000000000000000000n);
+  assert.equal(fixedToUnits(0n), 0n);
+});
+
+test('fixedToUnits agrees with fromFloat within double precision — the two take genuinely different rounding paths (truncating BigInt division vs toFixed\'s round-to-nearest) below the 18th decimal, so this checks the value they both actually mean, not bit-for-bit string equality that far down', () => {
+  const fixed = numberToFixed(123456.789);
+  assert.equal(format(fixedToUnits(fixed), 8), format(fromFloat(123456.789), 8));
+});
+
+test('fixedToUnits rejects a non-bigint or a negative value', () => {
+  assert.throws(() => fixedToUnits(5));
+  assert.throws(() => fixedToUnits(-SCALE));
 });
 
 test('format trims to a readable number of decimals without padding false precision', () => {
