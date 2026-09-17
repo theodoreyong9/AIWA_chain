@@ -19,19 +19,26 @@
 // real bigint balance, resets the patience clock.
 
 import { applyProgressionEvent, initialProgressionState } from './progression.js';
-import { reward, domainAge } from './reward.js';
-import { toUnits, fromFloat } from './units.js';
+import { rewardFixed, domainAge } from './reward.js';
+import { toUnits, fixedToUnits } from './units.js';
 
 export function initialAccrualState() {
   return { progression: initialProgressionState(), positions: {}, balances: {}, rejections: [] };
 }
 
-function currentlyClaimable(rewardParams, state, domain) {
+// Straight from rewardFixed()'s own reproducible Q128 BigInt to real
+// on-chain base units — no JS Number in between. This is the actual
+// point of rewardFixed existing: a claim is a real balance credit, and
+// routing it through a float first (the old reward()+fromFloat path)
+// would reintroduce the one non-reproducible step a future Rust node
+// would disagree with a JS one on.
+function currentlyClaimableUnits(rewardParams, state, domain) {
   const position = state.positions[domain];
-  if (!position) return 0;
+  if (!position) return 0n;
   const currentEpoch = domainAge(state.progression, domain);
   const t = Math.max(0, currentEpoch - position.lastActionEpoch);
-  return reward(position.b, t, currentEpoch, position.T ?? 0, rewardParams);
+  const fixed = rewardFixed(position.b, t, currentEpoch, position.T ?? 0, rewardParams);
+  return fixed === null ? 0n : fixedToUnits(fixed);
 }
 
 export async function applyAccrualEvent(rewardParams, state, event, verifyFn) {
@@ -59,8 +66,7 @@ export async function applyAccrualEvent(rewardParams, state, event, verifyFn) {
     if (typeof domain !== 'string' || !domain) return reject('missing domain');
     if (!state.positions[domain]) return reject('no committed capital for this domain');
 
-    const claimableFloat = currentlyClaimable(rewardParams, state, domain);
-    const claimableUnits = claimableFloat > 0 ? fromFloat(claimableFloat) : 0n;
+    const claimableUnits = currentlyClaimableUnits(rewardParams, state, domain);
 
     let amount;
     try {
@@ -90,6 +96,5 @@ export async function materializeAccrual(rewardParams, orderedEvents, verifyFn) 
 }
 
 export function claimableNow(rewardParams, state, domain) {
-  const floatValue = currentlyClaimable(rewardParams, state, domain);
-  return floatValue > 0 ? fromFloat(floatValue) : 0n;
+  return currentlyClaimableUnits(rewardParams, state, domain);
 }
