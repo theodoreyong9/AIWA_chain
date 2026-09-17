@@ -4,6 +4,8 @@ Two wallets, one identity. A Solana keypair activates a real, irreversible burn 
 
 Live: https://theodoreyong9.github.io/AIWA_chain/
 
+A focused reference implementation of the AIWA protocol, composed into two wallets — not a general-purpose platform. No modules, no plugin registry, no pools; that scope was deliberately cut to get this part right first. 348 real tests as of this writing, security-relevant cases named as such — all but one run unconditionally, the real cross-runtime check skipping gracefully (never failing) if no Rust toolchain is available.
+
 This document tells AIWA's story as a chain of causes and consequences — each mechanism exists because the one before it created a new problem. For the formal specification, see `docs/YELLOWPAPER.md`. For exactly what's verified and how, see `interop/rust-vdf/README.md`.
 
 ## 1. The problem this starts from
@@ -90,6 +92,24 @@ It doesn't remove partitions, impose a world clock, force every state to converg
 *How do you compare causal units produced by independent identities, with no global synchronization, while keeping their histories divergent and their economic materialization exact?* AIWA's answer, experimentally: local progression + causal history + observation + weighted correlation + exact economic materialization. The question stops being "how do we build a world computer that behaves like one computer" and becomes "how do histories that never needed to become one history still talk to each other."
 
 ---
+
+## How this differs from extending a single chain across the latency gap
+
+Published proposals for interplanetary cryptocurrency generally keep one, Earth-anchored consensus chain and add delay-tolerant transport, wider payment-channel timelocks, and federated settlement on top — a real, workable answer for transferring already-created value under real latency. That approach carries a real, acknowledged cost on the other half of the problem: value *creation* stays dominated by whichever side has more real compute, since mining from Mars against Earth's own hashpower is, by that same literature's own account, structurally unprofitable. This project takes value creation itself off any consensus chain entirely — a domain creates real, VDF-bound value at its own real pace, from its own committed capital, with zero dependency on anyone else's compute or connectivity; reconciliation only ever adds a real, informational signal afterward, never a correction. See `docs/YELLOWPAPER.md` §11.1 for the fuller, cited version of this — including what still isn't solved here (the real transport itself, and any real exchange rate between two economies that grew up apart).
+
+## Yellow Paper, in LaTeX and as a real PDF
+
+`docs/YELLOWPAPER.tex` is the real, source-of-truth LaTeX version — `docs/YELLOWPAPER.md` stays as the plain-text version for reading directly on GitHub. `public/YELLOWPAPER.pdf` is a real, pre-built PDF (compiled and visually verified page by page before being committed), served directly by the app itself — the "Yellow Paper" link in the top bar of every tab opens it. If you edit the `.tex`, regenerate the PDF and copy it back into `public/`:
+
+```
+cd docs && pdflatex YELLOWPAPER.tex && pdflatex YELLOWPAPER.tex && cp YELLOWPAPER.pdf ../public/
+```
+
+(twice, so LaTeX's own cross-references resolve correctly — the first pass leaves them as `??`).
+
+## Writing your own contract
+
+`docs/WRITING-A-CONTRACT.md` — a real, concrete guide, not abstract advice. Every rule in it comes from something either verified concretely while building `generous-transfer.js`, or from a real, specific vulnerability found and closed along the way — including two real attacks (a free-preview grinding attack, and a fabricated-VDF-output attack) discovered and closed before ever being shipped. Start there before writing a new one.
 
 ## Architecture
 
