@@ -13,13 +13,18 @@ Causal Tick's own consistency check (`causal-tick.js`, §13), the
 real, *practical* Wesolowski verification (`wesolowski-vdf.js`,
 §6.1) — including real prime-derivation and Miller-Rabin primality
 testing, the one path an external, gas-constrained chain would
-genuinely use, never the raw symmetric chain — and Ed25519 signature
+genuinely use, never the raw symmetric chain — Ed25519 signature
 verification, checked against a real, independent Rust library
 (`ed25519-dalek`) rather than the real JS one this project uses
 (`@noble/curves`), confirming the algorithm itself, not one
-implementation, is what a real signature depends on — each
-written directly from the same real specification, never by wrapping
-or transpiling the JS. Standard, already-widespread primitives
+implementation, is what a real signature depends on — and the real
+reward formula's own Q128 fixed-point core (`reward.js`'s
+`rewardFixed`, backed by `fixed-point-math.js`) — a real, from-scratch
+BigInt ln/exp/pow, never `Math.log`/`Math.pow`, since IEEE 754 only
+guarantees +,-,*,/ agree bit-for-bit across runtimes, never
+transcendental functions, and `reward()`'s own output funds a real,
+on-chain AIWA claim (`accrual.js`) — each written directly from the
+same real specification, never by wrapping or transpiling the JS. Standard, already-widespread primitives
 (Ed25519 signatures, SHA-256 itself) are deliberately left to each
 ecosystem's own standard library rather than reimplemented here — the
 real, checked risk is silent divergence in this project's *own custom
@@ -53,20 +58,23 @@ exactly.
 ## What this does and does not claim
 
 **Does**: prove that this protocol's own most fundamental, real
-computation — a real, sequential SHA-256 chain, and real
-content-addressed identity — is specified precisely enough to
-reproduce byte-for-byte in a genuinely different language and runtime.
-This is what makes the claim "the transport, the runtime, the
-implementation never enter into the value" a real, checked property
-rather than an assertion.
+computation — a real, sequential SHA-256 chain, real content-addressed
+identity, and now the reward formula's own real arithmetic core — is
+specified precisely enough to reproduce byte-for-byte in a genuinely
+different language and runtime. This is what makes the claim "the
+transport, the runtime, the implementation never enter into the value"
+a real, checked property rather than an assertion.
 
 **Does not**: claim this is a full or even partial Rust port of
-AIWA Chain. The accrual formula, conservation, Mirror, Causal Tick,
-and every other real piece of the protocol exist only in
+AIWA Chain. `rewardFixed`'s own arithmetic core is covered — the
+surrounding event-sourcing state machine (`accrual.js`'s own
+`applyAccrualEvent`/position tracking/rejection handling), plus
+conservation, Mirror, Causal Tick's own full flow, and every other
+real piece of the protocol beyond what's listed above, exist only in
 `public/core/` (JavaScript). A genuine multi-runtime implementation of
 the whole protocol would be a real, separate, substantial undertaking
-— this demonstrates the one, specific claim that undertaking would
-depend on being true, not the whole thing.
+— this demonstrates the specific claims that undertaking would depend
+on being true, not the whole thing.
 
 ## A real, practical note on toolchain versions
 

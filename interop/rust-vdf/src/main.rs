@@ -15,8 +15,9 @@
 
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use num_bigint::BigUint;
+use num_bigint::{BigInt, BigUint, Sign};
 use num_bigint::ToBigUint;
+use num_traits::ToPrimitive;
 use std::str::FromStr;
 use ed25519_dalek::{Signature, VerifyingKey, Verifier};
 
@@ -268,6 +269,203 @@ fn verify_ed25519(pubkey_hex: &str, message: &[u8], signature_hex: &str) -> bool
     verifying_key.verify(message, &signature).is_ok()
 }
 
+// A real, independent Rust implementation of public/core/fixed-point-math.js
+// and public/core/reward.js's own rewardFixed — Q128 binary fixed-point
+// BigInt in place of Math.log/Math.pow, since IEEE 754 never guarantees
+// those two agree bit-for-bit between two different runtimes the way
+// +,-,*,/ do, and reward.js's own output funds a real, on-chain AIWA
+// claim (accrual.js). Written from the identical specification the JS
+// module documents in its own header, operation by operation — the one
+// rule enforced throughout, on both sides, is to never bit-shift a
+// negative BigInt (sign tracked and reapplied separately instead), which
+// is what makes this reproducible regardless of how either language's
+// BigInt happens to represent a negative value internally.
+const FRAC_BITS: u32 = 128;
+
+fn scale() -> BigInt {
+    BigInt::from(1) << FRAC_BITS
+}
+
+fn mul_fixed(a: &BigInt, b: &BigInt) -> BigInt {
+    (a * b) / scale()
+}
+
+fn div_fixed(a: &BigInt, b: &BigInt) -> BigInt {
+    (a * scale()) / b
+}
+
+fn bit_length_non_neg(n: &BigInt) -> i64 {
+    if n.sign() == Sign::Minus {
+        panic!("bit_length_non_neg: negative input");
+    }
+    let mut bits: i64 = 0;
+    let mut x = n.clone();
+    let zero = BigInt::from(0);
+    while x > zero {
+        x >>= 1u32;
+        bits += 1;
+    }
+    bits
+}
+
+// The identical exact IEEE-754 double decomposition as numberToFixed in
+// fixed-point-math.js — f64::to_bits() gives the same sign/exponent/
+// mantissa bit layout a JS DataView read of the same double does, so an
+// identical real value always decomposes identically in both languages.
+fn number_to_fixed(x: f64) -> BigInt {
+    if !x.is_finite() {
+        panic!("number_to_fixed: not finite");
+    }
+    if x == 0.0 {
+        return BigInt::from(0);
+    }
+    let bits = x.to_bits();
+    let sign = (bits >> 63) & 1;
+    let raw_exp = (bits >> 52) & 0x7ff;
+    let raw_mantissa = bits & 0xfffffffffffff;
+    let (exp2, mantissa): (i64, u64) = if raw_exp == 0 {
+        (-1074, raw_mantissa)
+    } else {
+        (raw_exp as i64 - 1023 - 52, raw_mantissa | (1u64 << 52))
+    };
+    let shift = exp2 + FRAC_BITS as i64;
+    let magnitude = if shift >= 0 {
+        BigInt::from(mantissa) << (shift as u32)
+    } else {
+        BigInt::from(mantissa) >> ((-shift) as u32)
+    };
+    if sign == 1 { -magnitude } else { magnitude }
+}
+
+// 2*atanh(y) = 2*(y + y^3/3 + y^5/5 + ...), for 0 <= y <= 1/3 — the
+// identical fixed term count (never "until convergence") as
+// fixed-point-math.js's own lnSeriesFromY.
+const LN_SERIES_TERMS: i64 = 60;
+
+fn ln_series_from_y(y: &BigInt) -> BigInt {
+    let y2 = mul_fixed(y, y);
+    let mut term = y.clone();
+    let mut denom = BigInt::from(1);
+    let mut sum = BigInt::from(0);
+    for _ in 0..LN_SERIES_TERMS {
+        sum += &term / &denom;
+        term = mul_fixed(&term, &y2);
+        denom += 2;
+    }
+    sum * 2
+}
+
+fn ln2() -> BigInt {
+    let one_third = scale() / 3;
+    ln_series_from_y(&one_third)
+}
+
+fn ln_fixed(x: &BigInt) -> BigInt {
+    if x.sign() != Sign::Plus {
+        panic!("ln_fixed: domain error, x must be > 0");
+    }
+    let k = bit_length_non_neg(x) - 1 - FRAC_BITS as i64;
+    let t = if k >= 0 { x >> (k as u32) } else { x << ((-k) as u32) };
+    let y = div_fixed(&(&t - scale()), &(&t + scale()));
+    let ln_t = ln_series_from_y(&y);
+    BigInt::from(k) * ln2() + ln_t
+}
+
+// exp(r) Taylor series: 1 + r + r^2/2! + ... — the identical fixed term
+// count as fixed-point-math.js's own expSeriesFromR.
+const EXP_SERIES_TERMS: i64 = 40;
+
+fn exp_series_from_r(r: &BigInt) -> BigInt {
+    let mut term = scale();
+    let mut sum = scale();
+    for i in 1..=EXP_SERIES_TERMS {
+        term = mul_fixed(&term, r) / i;
+        sum += &term;
+    }
+    sum
+}
+
+// Round n/d to the nearest integer (ties away from zero), d > 0 — using
+// only truncating division on non-negative operands, exactly like
+// fixed-point-math.js's own divRoundNearest, so neither side ever needs
+// to ask what dividing a *negative* BigInt truncates to.
+fn div_round_nearest(n: &BigInt, d: &BigInt) -> BigInt {
+    let sign: BigInt = if n.sign() == Sign::Minus { BigInt::from(-1) } else { BigInt::from(1) };
+    let abs_n = if n.sign() == Sign::Minus { -n } else { n.clone() };
+    sign * ((&abs_n + d / 2) / d)
+}
+
+fn exp_fixed(x: &BigInt) -> BigInt {
+    let ln2_val = ln2();
+    let k = div_round_nearest(x, &ln2_val);
+    let r = x - &k * &ln2_val;
+    let series = exp_series_from_r(&r);
+    if k.sign() != Sign::Minus {
+        let k_u32 = k.to_u32().expect("exp_fixed: k too large to shift by");
+        series << k_u32
+    } else {
+        let neg_k_u32 = (-&k).to_u32().expect("exp_fixed: k too large to shift by");
+        series >> neg_k_u32
+    }
+}
+
+fn pow_fixed(a: &BigInt, b: &BigInt) -> BigInt {
+    if a.sign() != Sign::Plus {
+        panic!("pow_fixed: domain error, a must be > 0");
+    }
+    exp_fixed(&mul_fixed(b, &ln_fixed(a)))
+}
+
+struct RewardParams {
+    alpha: f64,
+    beta: f64,
+    gamma: f64,
+    c: f64,
+    min_q: f64,
+}
+
+// The identical, real algorithm as reward.js's own rewardFixed — same
+// guards, same order, returning None exactly where the JS side returns
+// null (and reward() itself then returns a plain 0).
+fn reward_fixed(b: f64, q: f64, q_total: f64, patience_rate: f64, params: &RewardParams) -> Option<BigInt> {
+    if q < params.min_q {
+        return None;
+    }
+    let t = patience_rate.max(0.0).min(0.4);
+    let eff_q = q.max(1.0);
+    let eff_q_total = q_total.max(1.0);
+
+    let b_fixed = number_to_fixed(b);
+    let alpha_fixed = number_to_fixed(params.alpha);
+    let beta_fixed = number_to_fixed(params.beta);
+    let gamma_fixed = number_to_fixed(params.gamma);
+    let c_fixed = number_to_fixed(params.c);
+    let eff_q_fixed = number_to_fixed(eff_q);
+    let eff_q_total_fixed = number_to_fixed(eff_q_total);
+    let one_minus_t_fixed = scale() - number_to_fixed(t);
+
+    let numerator = mul_fixed(&pow_fixed(&eff_q_fixed, &alpha_fixed), &b_fixed);
+    let exponent = mul_fixed(&beta_fixed, &one_minus_t_fixed);
+    let inner = pow_fixed(&eff_q_total_fixed, &exponent) + &c_fixed;
+    if inner <= scale() {
+        return None;
+    }
+
+    let ln_inner = ln_fixed(&inner);
+    let denominator = pow_fixed(&ln_inner, &gamma_fixed);
+    if denominator.sign() != Sign::Plus {
+        return None;
+    }
+
+    let r = div_fixed(&numerator, &denominator);
+    let cap_fixed = number_to_fixed(1e12);
+    if r.sign() == Sign::Minus || r > cap_fixed {
+        None
+    } else {
+        Some(r)
+    }
+}
+
 fn main() {
     // Real, fixed test vectors — the identical ones
     // tests/rust-interop.test.mjs computes against via the real JS
@@ -362,8 +560,22 @@ fn main() {
     let tampered_message = b"{\"contractId\":\"aiwa-generous-transfer-v1\",\"to\":\"mallory\"}";
     let ed25519_invalid = verify_ed25519(ed_pubkey, tampered_message, ed_signature);
 
+    // A real, independent Rust computation of reward.js's own rewardFixed
+    // — the identical, real test vectors tests/rust-interop.test.mjs
+    // computes against via the real JS module, so the two real,
+    // independently-derived Q128 BigInt results can be compared
+    // byte-for-byte (as decimal strings — the actual, on-chain-relevant
+    // representation, never round-tripped through either language's own
+    // float type first).
+    let reward_params = RewardParams { alpha: 1.1, beta: 2.2, gamma: 3.0, c: 33f64.powi(3), min_q: 1.0 };
+    let reward_basic = reward_fixed(10.0, 5_000_000.0, 5_000_000.0, 0.2, &reward_params)
+        .expect("reward_basic must be Some for these real, valid inputs");
+    let reward_one_year = reward_fixed(10.0, 112_000_000.0, 112_000_000.0, 0.2, &reward_params)
+        .expect("reward_one_year must be Some for these real, valid inputs");
+    let reward_below_min_q = reward_fixed(10.0, 0.0, 1.0, 0.0, &reward_params);
+
     println!(
-        "{{\"vdf1\":\"{}\",\"vdf2\":\"{}\",\"vdf3\":\"{}\",\"domainId\":\"{}\",\"genesisId\":\"{}\",\"accrualId\":\"{}\",\"composedId\":\"{}\",\"losingHash\":\"{}\",\"losingCheck4\":{},\"winningHash\":\"{}\",\"winningCheck8\":{},\"median1\":{},\"median2\":{},\"secondAmount\":\"{}\",\"monotonicityCase1\":{},\"monotonicityCase2\":{},\"ratio\":{},\"consistentCase\":{},\"consistentGap\":{},\"inconsistentCase\":{},\"inconsistentGap\":{},\"wesolowskiValid\":{},\"wesolowskiInvalid\":{},\"ed25519Valid\":{},\"ed25519Invalid\":{}}}",
+        "{{\"vdf1\":\"{}\",\"vdf2\":\"{}\",\"vdf3\":\"{}\",\"domainId\":\"{}\",\"genesisId\":\"{}\",\"accrualId\":\"{}\",\"composedId\":\"{}\",\"losingHash\":\"{}\",\"losingCheck4\":{},\"winningHash\":\"{}\",\"winningCheck8\":{},\"median1\":{},\"median2\":{},\"secondAmount\":\"{}\",\"monotonicityCase1\":{},\"monotonicityCase2\":{},\"ratio\":{},\"consistentCase\":{},\"consistentGap\":{},\"inconsistentCase\":{},\"inconsistentGap\":{},\"wesolowskiValid\":{},\"wesolowskiInvalid\":{},\"ed25519Valid\":{},\"ed25519Invalid\":{},\"rewardBasic\":\"{}\",\"rewardOneYear\":\"{}\",\"rewardBelowMinQIsNone\":{}}}",
         vdf1, vdf2, vdf3, domain_id, genesis_id, accrual_id, composed_id,
         losing_hash, check_outcome(&losing_hash, 4),
         winning_hash, check_outcome(&winning_hash, 8),
@@ -373,6 +585,7 @@ fn main() {
         ratio,
         consistent_case, consistent_gap, inconsistent_case, inconsistent_gap,
         wesolowski_valid, wesolowski_invalid,
-        ed25519_valid, ed25519_invalid
+        ed25519_valid, ed25519_invalid,
+        reward_basic, reward_one_year, reward_below_min_q.is_none()
     );
 }
