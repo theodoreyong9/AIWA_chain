@@ -33,11 +33,13 @@ Once a domain can prove it progressed, that progression needs to translate into 
 
 Neither is ever taken from an event's own payload — both are recomputed from the domain's already-verified progression state, every time. That's the concrete fix behind a real, closed bug: a caller-supplied reference epoch would have let a domain fabricate an early starting point for its own patience clock.
 
-## 5. The reward formula: making patience a real economic property
+## 5. The reward formula
 
 $$r(b, q, q_{total}, T) = \frac{b \cdot q^\alpha}{\left[\ln\left(q_{total}^{\beta(1-T)} + C\right)\right]^\gamma}$$
 
 where `b` is a linear scale factor, `q` is progression accumulated since the last claim, `q_total` is the domain's own total progression (never a value shared across domains — that would reintroduce exactly the cross-domain synchronization this whole system exists to avoid), `T` is a patience parameter clamped to `[0, 0.4]`, `α`/`β`/`γ` are shape parameters, and `C` is a damping constant. Three guards are explicit in the code, never implicit: `q < minQ` returns zero outright (no artificial micro-reward); `effQ = max(1, q)` and `effQTotal = max(1, qTotal)` avoid pathological behavior at zero; and a reward exceeding `1e12` returns zero as a hard ceiling against any parameter combination producing a numeric explosion.
+
+**`T` is real in the formula and in `accrual.js`'s own state (a position can carry a `T`), but not yet reachable from the shipped app.** `public/app/ignition.js` is the only place a real `'accrual'` event is ever built, and it never sets a `T` field — every real position's `T` falls through to `0`. The `(1-T)` softening term is unit-tested directly against `reward()`/`rewardFixed()`, and the state machine will carry a non-zero `T` if an event supplies one, but nothing in the current UI, or in any accrual/wallet integration test, ever does. Patience is a designed, working property of the formula — not yet a property a real domain can actually exercise.
 
 ## 6. Why accrual alone isn't a defense — genesis cost and churn
 
@@ -211,6 +213,7 @@ Automatic on push to `main` — `.github/workflows/deploy.yml` runs the real tes
 - The real, standard BIP39 + SLIP-0010 derivation (`deriveKeypairFromBip39Mnemonic`) has been verified against three independent test vectors, cross-checked against a second, independent library, and matches Phantom/Solflare's own real, standard address exactly for each — real, but never tested against an actual, real Phantom or Solflare wallet in a real browser. Verify it yourself against a real wallet you control before trusting it with real funds.
 - Mirror's reception monotonicity, and the residual-diversity entropy score, are both real, computable signals — neither proves two domains are genuinely distinct entities, and neither rules out a pair that has simply agreed in advance to produce a consistent-looking history together. No purely relational mechanism, with no external anchor, can close that gap.
 - Causal Tick and the emergent relative rate both return an honest `null` when there isn't yet enough real evidence to compute one — never a forced or default answer standing in for missing evidence.
+- The reward formula's `T` (patience) parameter is implemented and unit-tested in `reward.js`/`accrual.js`, but `public/app/ignition.js` — the only real place an `'accrual'` event is built — never sets it, and no accrual/wallet integration test does either. Every real position's `T` is `0` in the app as currently shipped; wiring a real, user-facing patience control remains real, undone work.
 
 ## License
 
