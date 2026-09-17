@@ -12,6 +12,7 @@ import { evaluate, verify as verifyWesolowski } from '../public/core/wesolowski-
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { computeOutcomeHash, checkOutcome } from '../public/core/generous-transfer.js';
 import { weightedMedian } from '../public/core/weighted-median.js';
+import { rewardFixed } from '../public/core/reward.js';
 
 // A real, independent Rust implementation (interop/rust-vdf) of the
 // identical, real specification vdf.js and domain-id.js implement —
@@ -162,6 +163,26 @@ test('THE REAL CROSS-RUNTIME PROPERTY: an independent Rust implementation produc
   assert.equal(jsEdValid, true, 'sanity: the real, known-good Ed25519 test vector must verify in JS itself first');
   assert.equal(rustOutput.ed25519Valid, true, 'a real signature, produced by the real JS library this project uses, must verify under a genuinely different, independent real Rust library');
   assert.equal(rustOutput.ed25519Invalid, false, 'a real, tampered message must be rejected identically — the real signature was never over this content');
+
+  // THE REAL FIX this test file exists to prove: reward.js's own
+  // rewardFixed (Q128 fixed-point BigInt, never Math.log/Math.pow) must
+  // agree with a genuinely independent Rust implementation of the
+  // identical, real algorithm — bit-for-bit, compared as decimal
+  // strings, never through either language's own float type. This is
+  // the concrete demonstration that closes the real cross-runtime gap:
+  // reward.js's output funds a real, on-chain AIWA claim (accrual.js),
+  // and Math.log/Math.pow carry no such guarantee across runtimes —
+  // only +,-,*, and truncating-toward-zero / do.
+  const rewardParams = { alpha: 1.1, beta: 2.2, gamma: 3, C: Math.pow(33, 3), minQ: 1 };
+  const jsRewardBasic = rewardFixed(10, 5_000_000, 5_000_000, 0.2, rewardParams);
+  const jsRewardOneYear = rewardFixed(10, 112_000_000, 112_000_000, 0.2, rewardParams);
+  const jsRewardBelowMinQ = rewardFixed(10, 0, 1, 0, rewardParams);
+
+  assert.notEqual(jsRewardBasic, null, 'sanity: the real, known-good reward test vector must be non-null in JS itself first');
+  assert.equal(rustOutput.rewardBasic, jsRewardBasic.toString(), 'a real reward computation must match exactly, to the last decimal digit, across runtimes — the whole point of Q128 fixed-point BigInt over Math.log/Math.pow');
+  assert.equal(rustOutput.rewardOneYear, jsRewardOneYear.toString(), 'a real, extreme case (one full year of continuous domain progression, ~112M epochs) must also match exactly — the exact regime the original Math.pow(qTotal, ...) computation risked overflowing in before ever reaching Math.log');
+  assert.equal(jsRewardBelowMinQ, null, 'sanity: q below minQ must be null in JS itself first');
+  assert.equal(rustOutput.rewardBelowMinQIsNone, true, 'the below-minQ gate must reject identically across runtimes too, not just the arithmetic above it');
 });
 
 function hexToBytesLocal(hex) {
