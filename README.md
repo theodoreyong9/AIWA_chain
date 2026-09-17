@@ -4,7 +4,7 @@ Two wallets, one identity. A Solana keypair activates a real, irreversible burn 
 
 Live: https://theodoreyong9.github.io/AIWA_chain/
 
-A focused reference implementation of the AIWA protocol, composed into two wallets — not a general-purpose platform. No modules, no plugin registry, no pools; that scope was deliberately cut to get this part right first. 348 real tests as of this writing, security-relevant cases named as such — all but one run unconditionally, the real cross-runtime check skipping gracefully (never failing) if no Rust toolchain is available.
+A focused reference implementation of the AIWA protocol, composed into two wallets — not a general-purpose platform. No modules, no plugin registry, no pools; that scope was deliberately cut to get this part right first. 357 real tests as of this writing, security-relevant cases named as such — all but one run unconditionally, the real cross-runtime check skipping gracefully (never failing) if no Rust toolchain is available.
 
 This document tells AIWA's story as a chain of causes and consequences — each mechanism exists because the one before it created a new problem. For the formal specification, see `docs/YELLOWPAPER.md`. For exactly what's verified and how, see `interop/rust-vdf/README.md`.
 
@@ -101,6 +101,8 @@ Published proposals for interplanetary cryptocurrency generally keep one, Earth-
 
 `docs/WRITING-A-CONTRACT.md` — a real, concrete guide, not abstract advice. Every rule in it comes from something either verified concretely while building `generous-transfer.js`, or from a real, specific vulnerability found and closed along the way — including two real attacks (a free-preview grinding attack, and a fabricated-VDF-output attack) discovered and closed before ever being shipped. Start there before writing a new one.
 
+Tracking a contract's own state (which offers are still pending, which have already resolved) used to mean writing a bespoke scanner from scratch for each one — `generous-send-scan.js` and `matching-contract-scan.js` had independently reimplemented the identical "which ids has this domain's own progression already consumed" scan, byte for byte, and a second "group these events by a derived key" pattern was duplicated between `matching-contract-scan.js` and `relative-rate-scan.js`. `public/core/contract-scan.js` now factors both into two real, generic primitives — `collectProgressionParentIds` and `groupEventsByKey` — that the three existing scan files delegate to instead of each rolling their own. A future contract tracking richer state than pending/resolved starts from these, rather than reinventing them.
+
 ## Architecture
 
 ```
@@ -152,6 +154,11 @@ public/core/
   contract-registry.js           publishes any real contract's own source as a real,
                              content-addressed event — reachable from Give's own
                              "Publish a contract" card
+  contract-scan.js               generic scanning primitives for a contract's own
+                             DAG-derived state — collectProgressionParentIds and
+                             groupEventsByKey, factored out of three independently
+                             duplicated scan implementations (see "Writing your own
+                             contract" above)
 
 public/app/
   the reference UI — Continuum (AIWA wallet, a real trajectory of your

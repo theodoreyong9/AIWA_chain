@@ -110,7 +110,7 @@ Real prover cost is on the order of $2T$ modular multiplications (evaluation's o
 \label{sec:accrual}
 
 \[
-R(S, t, A) = \frac{S \cdot t^{\alpha}}{\left[\beta \ln A + \ln\left(1 + C/A^{\beta}\right)\right]^{\gamma}}
+R(S, t, A, T) = \frac{S \cdot t^{\alpha}}{\left[\beta(1-T) \ln A + \ln\left(1 + C/A^{\beta(1-T)}\right)\right]^{\gamma}}
 \]
 
 \begin{center}
@@ -121,6 +121,7 @@ Symbol & Meaning \\
 $S$ & committed capital (\S\ref{sec:genesis}, cumulative) \\
 $t$ & epochs since $D$'s own last economic action (burn or claim); resets on each \\
 $A$ & $D$'s own total progression age; never resets \\
+$T$ & patience parameter, clamped to $[0, 0.4]$ \\
 $\alpha, \beta, \gamma, C$ & deployment parameters \\
 \bottomrule
 \end{tabular}
@@ -130,7 +131,20 @@ $\alpha, \beta, \gamma, C$ & deployment parameters \\
 
 $t$ resetting on claim encodes patience \emph{since last action}, not since genesis; $A$, unreset, is a maturity denominator independent of claiming frequency.
 
-\emph{Computable form:} $\beta \ln A + \ln(1 + C/A^{\beta}) \equiv \ln(A^{\beta} + C)$, represented in the left form to bound overflow for large $A$.
+\emph{Computable form:} $\beta(1-T) \ln A + \ln(1 + C/A^{\beta(1-T)}) \equiv \ln(A^{\beta(1-T)} + C)$, represented in the left form to bound overflow for large $A$.
+
+\textbf{Not yet wired.} Unlike $t$ and $A$, $T$ \emph{is} accepted directly from an \code{accrual} event's own payload --- carried forward unchanged on a later event for the same domain that omits it, defaulting to $0$ if never set at all. The reference application's own \code{ignition.js}, the only real place a real \code{accrual} event is ever built, never sets $T$ --- every real position's $T$ is $0$ in the app as currently shipped. The $(1-T)$ term itself is real and unit-tested directly against $R$; a real, user-facing patience control remains undone work.
+
+\subsection{Reproducibility across runtimes (Q128 fixed point)}
+\label{sec:repro}
+
+$t^{\alpha}$, $A^{\beta(1-T)}$, and the outer $\ln(\cdot)^{\gamma}$ are fractional-exponent and transcendental operations. IEEE 754 guarantees $+, -, \times, \div$ agree bit-for-bit across runtimes; it guarantees nothing for a fractional-exponent \code{pow} or a \code{log} --- two different \code{libm} builds may legitimately disagree in the last bit, and $R$'s own output funds a real, on-chain claim (\S9).
+
+\code{fixed-point-math.js} computes \code{ln}, \code{exp}, and fractional \code{pow} from nothing but BigInt $+, -, \times, \div$, in Q128 binary fixed point (128 fractional bits): a fixed, hardcoded series-term count for each (never ``until convergence,'' itself runtime-variable), exact IEEE-754 double decomposition at the Number$\leftrightarrow$Fixed boundary, and one rule enforced throughout --- never bit-shift a negative BigInt, so no two runtimes' BigInt implementations have to agree on how that case behaves. \code{rewardFixed} is the reproducible Q128 BigInt core; \code{reward()}, the wrapper every existing caller already uses, is unchanged in signature and behavior, converting to/from a plain Number only at its own outer boundary --- a JS-only convenience, never part of the reproducibility guarantee.
+
+\textbf{A structural side effect, not merely a workaround.} $A^{\beta(1-T)}$ is now an arbitrary-precision BigInt rather than a capped-precision float --- the original float formula could in principle reach $\infty$ before $\ln$ ever ran, for a sufficiently large $A$ or $\beta$; the fixed-point version cannot overflow that way for any real parameter combination.
+
+\textbf{Verified concretely, cross-runtime.} An independently-written Rust port of the identical Q128 arithmetic produces the same BigInt, digit for digit, for real test vectors --- including a full year of continuous progression ($3976466040673248597032750975172588536399082$ for a basic case, $70070162968303128449516048132042380811409136$ after $\sim$112M epochs) --- part of \code{tests/rust-interop.test.mjs} alongside every other cross-runtime check (\S\ref{sec:content-addressing}, \S16.1).
 
 \section{Genesis Commitment}
 \label{sec:genesis}
@@ -169,7 +183,7 @@ A claim is a tuple $(\mathrm{id}, \mathrm{amount}, \mathrm{owner}, \mathrm{statu
 
 \section{Denomination}
 
-$1\ \mathrm{AIWA} = 10^{18}$ base units, always integer. Reward's fractional exponents require floating-point computation internally; the one real boundary where a value becomes part of a balance converts to an exact integer faithful to the float's own bits.
+$1\ \mathrm{AIWA} = 10^{18}$ base units, always integer. Reward's fractional exponents are computed in Q128 fixed-point BigInt arithmetic (\S\ref{sec:repro}), never in floating point internally. \code{accrual.js}'s own real claim path converts that Fixed BigInt straight to base units (\code{fixedToUnits}), never through a float. \code{reward()} itself, kept for existing plain-Number callers, still crosses to and from a float only at its own outer boundary --- a JS-only convenience, never part of the reproducibility guarantee (\S\ref{sec:repro}).
 
 \section{Partition and reconciliation}
 \label{sec:partition}
@@ -313,6 +327,12 @@ e_{\mathrm{payout}} = \{\mathrm{type}: \texttt{contract-payout}, \mathrm{contrac
 
 \code{wallet.js} instead exposes one real, generic extension point: a real \code{contractVerifiers} map --- $\{\mathrm{contractId} \mapsto \mathrm{verifyPayout}\}$ --- supplied by the application, never wallet.js's own source. On a real \code{contract-payout} event, wallet.js independently verifies only what every such contract shares (the pre-signed transfer's own real signature, identical to an ordinary \code{transfer}), then delegates entirely to the registered contract's own \code{verifyPayout(payload)} for everything contract-specific. A real, honest \code{null} from the verifier, or a returned shape not matching the real, submitted event's own fields, rejects outright --- nothing is trusted by default, and an unregistered $\mathrm{contractId}$ is refused, never silently ignored or treated as valid. \code{wallet.js}'s own source needs no further change for a new contract; only the application's own registry grows.
 
+\subsection{A generic scanning primitive for contract-own state}
+
+Tracking a contract's own pending/resolved state from its own DAG events is a second place per-contract hardcoding was tried informally and found not to scale --- the same shape of problem \S15.2 already closed for payouts, here for state. \code{generous-send-scan.js} and \code{matching-contract-scan.js} had independently reimplemented the identical scan --- every id already consumed as a parent of a \code{progression} event, optionally restricted to one domain or to a candidate set --- byte for byte in two of the three places it appeared; \code{matching-contract-scan.js} and \code{relative-rate-scan.js} had independently reimplemented a second pattern, grouping matching events by a derived key.
+
+\code{public/core/contract-scan.js} factors both into two real, generic primitives: \code{collectProgressionParentIds(events, \{domain, only\})} and \code{groupEventsByKey(events, \{predicate, keyOf, itemOf\})}. The three existing scan files now delegate to them; behavior is unchanged --- all 13 pre-existing scan tests pass unmodified, plus 9 new tests for the shared primitives themselves. A future contract needing state richer than pending/resolved starts from these, rather than reinventing the pattern.
+
 \section{Publishing a contract, content-addressed}
 
 A plain string identifier (\S15.1) carries no cryptographic anchor by itself --- nothing stops a second, different implementation from claiming the identical name. \code{contract-registry.js} closes this using the identical, real content-addressing already used for every other event (\S\ref{sec:content-addressing}): a contract's own real, complete source is embedded --- never only its hash --- in an ordinary \code{contract-spec} event published into the same DAG everything else lives in, so the real code is genuinely recoverable by anyone who receives this event, not merely fingerprint-verifiable against a copy kept elsewhere.
@@ -331,7 +351,7 @@ Once $e_{\mathrm{spec}}$ is received by other domains (Mirror, \S4, exactly like
 
 Every real event here is verifiable using only standard, non-proprietary primitives (Ed25519 signatures, SHA-256 content addressing) --- never a proprietary format only this project's own software understands. This means a genuinely different trust direction than a typical bridge: a bridge usually requires the receiving chain to trust an oracle or validator set's own claim about what happened elsewhere. Verifying one of \emph{this} project's real events requires trusting no organization at all --- only the same, already-public, standard algorithms most chains already implement natively. An external chain wanting to verify a real AIWA event would build its own adapter, entirely on its own terms, using only already-public primitives --- never a dependency this protocol introduces or must maintain.
 
-\textbf{Confirmed concretely, not left as a reasoned claim.} Every real primitive an external adapter would actually need is independently reproduced and verified in \code{interop/rust-vdf/} (\S16, extended for this): SHA-256 canonicalization (\S3.1), the practical, \emph{cheap} Wesolowski verification (\S6.1) --- the one an external, gas-constrained chain would genuinely use, never the raw symmetric chain, prohibitively expensive to redo --- including its own real prime-derivation and Miller-Rabin primality test, and Ed25519 signature verification, checked against a real, independent Rust library (\code{ed25519-dalek}) rather than the real JS one this project actually uses (\code{@noble/curves}) --- confirming the \emph{algorithm}, never one particular implementation, is what a real signature depends on. This is what ``no shared execution environment, no adapter dependency'' means concretely: a real, external verifier, in a real, different language, using real, different libraries, produces byte-identical answers.
+\textbf{Confirmed concretely, not left as a reasoned claim.} Every real primitive an external adapter would actually need is independently reproduced and verified in \code{interop/rust-vdf/} (\S16, extended for this): SHA-256 canonicalization (\S3.1), the practical, \emph{cheap} Wesolowski verification (\S6.1) --- the one an external, gas-constrained chain would genuinely use, never the raw symmetric chain, prohibitively expensive to redo --- including its own real prime-derivation and Miller-Rabin primality test, and Ed25519 signature verification, checked against a real, independent Rust library (\code{ed25519-dalek}) rather than the real JS one this project actually uses (\code{@noble/curves}) --- confirming the \emph{algorithm}, never one particular implementation, is what a real signature depends on. This is what ``no shared execution environment, no adapter dependency'' means concretely: a real, external verifier, in a real, different language, using real, different libraries, produces byte-identical answers. The reward formula's own Q128 fixed-point core (\S\ref{sec:repro}) is verified the identical way, added to \code{tests/rust-interop.test.mjs} alongside the checks above.
 
 \textbf{What this confirms, and what it still doesn't.} This is the real, structural readiness for interchain adapters --- not an adapter itself. No specific target chain's own contract language (Solidity, Move, or otherwise) has been chosen or implemented against; that remains real, deliberate future work, left to whichever chain chooses to build it, entirely on its own terms. What this section confirms is narrower and more load-bearing: the verification algorithm itself carries no hidden JS-specific dependency that would make such an adapter infeasible or need this project's own cooperation to build.
 
@@ -347,11 +367,11 @@ Identity & \code{public/core/domain-id.js} \\
 Event DAG & \code{public/core/event-dag.js} \\
 Sequential proof (\S6) & \code{public/core/vdf.js}, \code{public/core/wesolowski-vdf.js}, \code{public/core/bigint-math.js} \\
 Progression (\S5) & \code{public/core/progression.js} \\
-Accrual formula (\S7) & \code{public/core/reward.js} \\
+Accrual formula (\S7) & \code{public/core/reward.js}, \code{public/core/fixed-point-math.js} --- \code{rewardFixed()}'s own reproducible Q128 core (\S\ref{sec:repro}) \\
 Accrual position, t/A & \code{public/core/accrual.js} \\
 Genesis Commitment (\S8) & \code{public/core/identity-cost.js}, \code{public/core/solana-wallet.js} \\
 Churn profitability check & \code{public/core/churn-analysis.js} --- parameter-specific, not a general guarantee \\
-Cross-runtime interoperability & \code{interop/rust-vdf/} --- independent Rust, byte-identical to JS output across VDF, domain-id, event canonicalization, generous-transfer outcomes, weighted median, Conservation split, Mirror monotonicity, relative-rate, Causal Tick consistency, practical Wesolowski verification, and Ed25519 signatures (independent library) \\
+Cross-runtime interoperability & \code{interop/rust-vdf/} --- independent Rust, byte-identical to JS output across VDF, domain-id, event canonicalization, generous-transfer outcomes, weighted median, Conservation split, Mirror monotonicity, relative-rate, Causal Tick consistency, practical Wesolowski verification, Ed25519 signatures (independent library), and the reward formula's own Q128 fixed-point core (\S\ref{sec:repro}) \\
 Conservation (\S9) & \code{public/core/conservation.js} \\
 Denomination (\S10) & \code{public/core/units.js} \\
 Mirror (\S4) & \code{public/core/mirror.js} \\
@@ -360,6 +380,7 @@ Hardware roots (\S13.1) & \code{public/core/hardware-attestation.js} \\
 Relative rate, no clock (\S14) & \code{public/core/relative-rate.js}, \code{public/app/relative-rate-scan.js} --- purely informational, weighted like \S13 \\
 Generous transfer, deterministic (\S15) & \code{public/core/generous-transfer.js}, \code{public/app/generous-send-scan.js} --- never chance, verified end-to-end against the real progression protocol, cross-runtime verified (Rust) \\
 Contract composability, verified (\S15.1) & \code{public/core/matching-contract.js} --- a real, second contract, composing directly with generous-transfer.js \\
+Generic contract-state scanning (\S15.3) & \code{public/core/contract-scan.js} --- factored out of three independently duplicated scan implementations \\
 Contract publishing, content-addressed (\S16) & \code{public/core/contract-registry.js} \\
 Live peer-to-peer sync & \code{public/core/p2p-signaling.js}, \code{public/app/sync-protocol.js}, \code{public/app/p2p-connection.js}, \code{public/app/trystero-connection.js} \\
 Coherent composition & \code{public/core/wallet.js} \\
@@ -367,6 +388,6 @@ Coherent composition & \code{public/core/wallet.js} \\
 \end{tabular}
 \end{center}
 
-319 tests; every case but the cross-runtime check runs unconditionally, which skips (never fails) without a Rust toolchain. Security-relevant cases are named as such in their own files.
+357 tests; every case but the cross-runtime check runs unconditionally, which skips (never fails) without a Rust toolchain. Security-relevant cases are named as such in their own files.
 
 \end{document}
