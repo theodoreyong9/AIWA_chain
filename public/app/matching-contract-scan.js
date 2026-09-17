@@ -1,5 +1,10 @@
 // Pure, real scanning logic for matching-contract.js's own real
-// events — no browser dependency, directly testable in Node.
+// events — no browser dependency, directly testable in Node. Both
+// scans below delegate to the two general primitives in
+// core/contract-scan.js, shared with generous-send-scan.js and
+// relative-rate-scan.js.
+
+import { collectProgressionParentIds, groupEventsByKey } from '../core/contract-scan.js';
 
 /**
  * Every real match-commitment event still genuinely pending — a real
@@ -10,15 +15,14 @@
  * moment every match referencing it needs to be checked too.
  */
 export function scanPendingMatchCommitments(events, resolvedOfferIds) {
-  const byWrappedOfferId = {};
-  for (const ev of events) {
-    if (ev.payload?.type !== 'match-commitment') continue;
-    const wrappedId = ev.payload?.matchCommitment?.wrappedGenerousSendEventId;
-    if (!wrappedId || resolvedOfferIds.has(wrappedId)) continue; // already resolved — this real match had its one, real chance already
-    if (!byWrappedOfferId[wrappedId]) byWrappedOfferId[wrappedId] = [];
-    byWrappedOfferId[wrappedId].push({ id: ev.id, ...ev.payload });
-  }
-  return byWrappedOfferId;
+  return groupEventsByKey(events, {
+    predicate: (ev) =>
+      ev.payload?.type === 'match-commitment' &&
+      !!ev.payload?.matchCommitment?.wrappedGenerousSendEventId &&
+      !resolvedOfferIds.has(ev.payload.matchCommitment.wrappedGenerousSendEventId), // already resolved — this real match had its one, real chance already
+    keyOf: (ev) => ev.payload.matchCommitment.wrappedGenerousSendEventId,
+    itemOf: (ev) => ({ id: ev.id, ...ev.payload }),
+  });
 }
 
 /**
@@ -28,11 +32,5 @@ export function scanPendingMatchCommitments(events, resolvedOfferIds) {
  * re-eligible.
  */
 export function scanResolvedOfferIds(events) {
-  const resolved = new Set();
-  for (const ev of events) {
-    if (ev.payload?.type === 'progression') {
-      for (const p of ev.parents) resolved.add(p);
-    }
-  }
-  return resolved;
+  return collectProgressionParentIds(events);
 }
