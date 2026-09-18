@@ -4,6 +4,10 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>AIWA Chain</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<meta name="theme-color" content="#100e0c" />
+<link rel="icon" href="icons/icon-192.png" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -37,6 +41,16 @@
           <div style="color:#625a4d; font-size:11px">Check the browser console for the full error \u2014 this message exists so a failure is never silent.</div>
         </div>
       `;
+    }
+    // Deliberately here, not in app.js: app.js's own top-level static
+    // imports include CDN packages (trystero, qrcode, the @noble/@scure
+    // ones above) \u2014 if even one fails to load, the WHOLE module fails to
+    // evaluate and nothing in it ever runs, registration included. A
+    // classic script has no such all-or-nothing import graph, so this
+    // still registers (and the offline shell still works) even on a bad
+    // CDN day, exactly when it matters most.
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
     }
   </script>
   <script type="module" src="app/app.js"></script>

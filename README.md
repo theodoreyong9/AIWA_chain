@@ -213,6 +213,8 @@ npm test
 
 Open `public/index.html` through a real local server (module imports need `http://`, not `file://`) — e.g. `npx serve public`.
 
+It's also a PWA — installable from the browser's own install prompt. `public/sw.js` caches the app shell (all of `app/` and `core/`, the page, the stylesheet) so identity and wallet state already on the device still open with no network; registration lives in a plain inline script in `index.html`, not in `app.js`, since `app.js`'s own top-level imports include CDN packages (trystero, qrcode, the `@noble`/`@scure` ones) — if any of those fail to load, the whole module fails to evaluate, registration included, which would defeat the point on exactly the kind of bad-network day this exists for. Real Solana ignition and any P2P sync with another peer still need a genuine connection regardless.
+
 ## Deployment
 
 Automatic on push to `main` — `.github/workflows/deploy.yml` runs the real test suite first, deploys `public/` to GitHub Pages only if it passes.
